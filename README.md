@@ -1,6 +1,6 @@
 # aibrain
 
-A setup for AI agent tools on [Omarchy](https://omarchy.org), the same on every computer you own. It isn't tied to one tool: today it configures Claude Code, Codex and Grok, and adding another tool means adding a few links. One script, `bootstrap.sh`, brings a computer from any starting state to the full setup, and running it again changes nothing.
+A setup for AI agent tools on [Omarchy](https://omarchy.org), the same on every computer you own. It isn't tied to one tool: today it configures Claude Code, Codex and Grok, and adding another tool means adding a few links. One script, `bootstrap.sh`, brings a computer from any state to the full setup, and running it again changes nothing.
 
 What it gives you:
 
