@@ -2,9 +2,9 @@
 
 These skills come from other projects, under the MIT License. Their notices are below, as that license requires.
 
-## skills/grilling and skills/grill-me
+## skills/grilling, skills/grill-me, skills/grill-with-docs and skills/domain-modeling
 
-Copied unchanged from [mattpocock/skills](https://github.com/mattpocock/skills) (`skills/productivity/grilling` and `skills/productivity/grill-me`, as of 2026-10-07).
+Copied unchanged from [mattpocock/skills](https://github.com/mattpocock/skills) (`skills/productivity/grilling` and `skills/productivity/grill-me` as of 2026-10-07, `skills/engineering/grill-with-docs` and `skills/engineering/domain-modeling` as of 2026-10-16). `grill-with-docs` runs `grilling` and `domain-modeling`, so the three go together.
 
 > Copyright (c) 2026 Matt Pocock
 
