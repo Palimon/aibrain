@@ -96,7 +96,7 @@ This repo is public, so nothing personal may enter it, and a guard checks every 
 - Git hooks in `.githooks/`, which the script turns on in your checkout (`core.hooksPath`), run it on each commit (files, file names, identity, message) and each push (every commit, tag and file sent, which catches anything committed with `--no-verify`).
 - `.github/workflows/privacy.yml` runs it on GitHub for every push, with the denylist from the repo's `AIBRAIN_DENYLIST` secret, which the script keeps in step with your layer. Its logs name the rule that matched, never the text.
 - A Claude Code hook, `claude/hooks/privacy-guard.py`, refuses git commands that would skip the hooks in this repo.
-- Commits here carry your GitHub login and its noreply address, not your own email, unless `config.sh` sets `PUBLIC_GIT_NAME` and `PUBLIC_GIT_EMAIL`.
+- Commits here carry your GitHub login and its noreply address, not your own email, unless `config.sh` sets `PUBLIC_GIT_NAME` and `PUBLIC_GIT_EMAIL`. Edit from a checkout, not in GitHub's web editor: GitHub records a web edit under its own committer address, which the scan rejects, and taking the commit back out of the history means a force-push.
 
 To check by hand: `python3 -I privacy/scan.py tree` for the files, `python3 -I privacy/scan.py history` for every commit.
 
