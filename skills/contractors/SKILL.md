@@ -39,7 +39,7 @@ The type sets the model and the cache. Pass `effort` on every spawn: it override
 | `contractor-fable` | Fable | gatherers, unless the brief forbids; others only if it allows | high |
 | `employee-sonnet`, `employee-opus`, `employee-fable` | as named | as for the contractor on that model | as for the contractor on that model |
 
-A gatherer is a `contractor-haiku` or `contractor-sonnet` that only reads and reports. Opus and Fable spawn them to keep wide reading out of their own context, and keep each one's job to about 4 minutes so their own 5-minute cache stays warm while they wait.
+A gatherer is a `contractor-haiku` or `contractor-sonnet` that only reads and reports. Opus and Fable spawn them to keep wide reading out of their own context. The spawner starts them with `run_in_background: true` and waits in checks that return as soon as each agent's transcript (the `output_file` its spawn returns) shows a final message. On a 5-minute cache each check lasts 230 seconds at most. It never ends its turn to wait: the agent that started it would get a notice instead of its report, and its cache could go cold. No one has to guess how long a gatherer will take.
 
 | Pick | For |
 |---|---|
