@@ -1,7 +1,8 @@
 # Your values for aibrain's bootstrap.sh, which sources this file on every run, on every computer.
 # Anything left out keeps the default shown. This file stays private: it's in your personal layer, never in the public repo.
 
-# git's global name and email. Left alone when empty.
+# git's global name and email. Left alone when empty. If GitHub blocks pushes that expose your email
+# (Settings > Emails), use your noreply address here, or those pushes are refused.
 GIT_NAME=""
 GIT_EMAIL=""
 
