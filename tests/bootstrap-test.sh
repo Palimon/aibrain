@@ -33,6 +33,8 @@ mkfixture() { # a personal layer repo: personal.example as committed, with test 
   printf '%s\n' 're:\bxyzzy-fixture-term\b' >> "$FIXTURE/privacy/denylist"
   mkdir -p "$FIXTURE/skills/fixture-skill"
   printf '%s\n' '---' 'name: fixture-skill' 'description: A personal skill.' '---' > "$FIXTURE/skills/fixture-skill/SKILL.md"
+  mkdir -p "$FIXTURE/claude/agents"
+  printf '%s\n' '---' 'name: fixture-agent' 'description: A personal agent.' '---' > "$FIXTURE/claude/agents/fixture-agent.md"
   git -C "$FIXTURE" init -q -b main && git -C "$FIXTURE" add -A &&
     git -C "$FIXTURE" -c user.name=t -c user.email=t@example.com commit -qm fixture
   git -C "$FIXTURE" config receive.denyCurrentBranch updateInstead   # the script pushes a new computer's folder
@@ -78,7 +80,7 @@ snap() {
   echo "setup: $(cat "$H/.config/aibrain/setup" 2>/dev/null || echo unsaved)"
   echo "projects: $(cd "$H/Projects" 2>/dev/null && ls | tr '\n' ' ')"
   echo "trusted by Claude: $(jq -r '(.projects // {}) | to_entries[] | select(.value.hasTrustDialogAccepted == true) | .key' "$H/.claude.json" 2>/dev/null | sed "s#$H#~#" | sort | tr '\n' ' ')"
-  for d in .claude .claude/skills .agents/skills .codex .codex/skills .grok .pi/agent/skills .hermes/skills .local/bin; do
+  for d in .claude .claude/skills .claude/agents .agents/skills .codex .codex/skills .grok .pi/agent/skills .hermes/skills .local/bin; do
     find "$H/$d" -mindepth 1 -maxdepth 1 \( -type l -o -name '*.json' -o -name '*.md' -o -name .git \) -printf "$d/%f -> %l\n" 2>/dev/null | sort
   done | sed "s#$H#~#g"
   local A="$H/Projects/aibrain" P="$H/Projects/aibrain-personal"
@@ -113,6 +115,11 @@ check_twice() {
     echo "SESSION_STATE_HOOK: NO"
   fi
   if grep -qx 'managed settings: installed' "$H.snap2"; then echo "MANAGED_SETTINGS: yes"; else echo "MANAGED_SETTINGS: NO"; fi
+  if grep -qx '.claude/agents/contractor-sonnet.md -> ~/Projects/aibrain/claude/agents/contractor-sonnet.md' "$H.snap2"; then
+    echo "AGENTS_LINKED: yes"
+  else
+    echo "AGENTS_LINKED: NO"
+  fi
   # The personal layer is linked and the privacy guard is on, and the committed files pass it
   if grep -qx '.claude/CLAUDE.md -> ~/Projects/aibrain-personal/AGENTS.md' "$H.snap2" &&
      grep -q '^aibrain git: hooks=.githooks identity=[^ ]* <[0-9]*+[^ ]*@users.noreply.github.com>$' "$H.snap2" &&
@@ -135,6 +142,7 @@ fresh)
   echo "--- ssh config"; cat "$H/.ssh/config"
   echo "--- hypr bindings"; cat "$H/.config/hypr/bindings.lua"
   if [[ -L "$H/.claude/skills/fixture-skill" ]]; then echo "PERSONAL_SKILL: yes"; else echo "PERSONAL_SKILL: NO"; fi
+  if [[ -L "$H/.claude/agents/fixture-agent.md" ]]; then echo "PERSONAL_AGENT: yes"; else echo "PERSONAL_AGENT: NO"; fi
   ;;
 no-personal)
   # No personal layer anywhere: the script makes one from personal.example, and links it

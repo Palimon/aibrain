@@ -13,7 +13,7 @@ An employee is a long-running domain expert for one project. It's made of three 
 
 An instance is one agent started from the definition. It lasts one episode, from its brief to its final message, and is disposable. Everything worth keeping goes into the kit.
 
-Anything else spawned is a contractor: one task or a short chain, no kit, no thread, 5-minute cache.
+Anything else spawned is a contractor: one task or a short chain, no kit, no thread, 5-minute cache (the `contractors` skill).
 
 ## What goes to an employee
 

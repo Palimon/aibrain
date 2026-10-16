@@ -8,7 +8,7 @@ What it gives you:
 - **Secrets through a 1Password service account** limited to one vault. Agents read keys with `op read` and never see more than that vault.
 - **Long Claude Code sessions that keep their memory.** Hooks compact a session only at a natural break and keep every prompt, reply and subagent report on disk (see [Long sessions](#long-sessions)).
 - **Opus at medium effort as the fixed default,** with per-task model picks that never stick (see [Model and effort](#model-and-effort)).
-- **Employee subagents** with a kit on disk, and the research behind each choice in `study/`.
+- **Subagents in two kinds:** contractors for one task, one type per model with the effort set per spawn, and employees with a kit on disk; the research behind each choice is in `study/` (see [Subagents](#subagents)).
 - **Your computers joined up:** GitHub, SSH with one key, Tailscale, and an OS agent on a hotkey.
 - **A privacy guard** that keeps personal details out of this public repo (see [Privacy guard](#privacy-guard)).
 
@@ -67,7 +67,7 @@ An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a termina
 | `AGENTS.md` | Your instructions for every agent, linked as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` and `~/.grok/AGENTS.md` |
 | `ssh/config` | SSH shortcuts to your computers and servers, included at the top of `~/.ssh/config` |
 | `privacy/denylist` | Names, addresses and anything else of yours that must never reach this repo |
-| `skills/`, `bin/` | Optional skills and scripts of your own, linked like this repo's. One there wins over one here with the same name. |
+| `skills/`, `claude/agents/`, `bin/` | Optional skills, Claude Code agents and scripts of your own, linked like this repo's. One there wins over one here with the same name. |
 | `NEXT-STEPS.md` | Your open work on the setup |
 
 The script finds the layer's repo in this order: `AIBRAIN_PERSONAL_REPO` when set (a URL or a path, or `none` for a plain folder), the existing checkout's own remote, then `aibrain-personal` on the GitHub account the script logs in as. It keeps the checkout up to date the same way as this repo's.
@@ -107,6 +107,7 @@ To check by hand: `python3 -I privacy/scan.py tree` for the files, `python3 -I p
 | `bootstrap.sh` | The setup script | Nothing; run it |
 | `skills/` | Skills, one folder each | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.pi/agent/skills`, `~/.hermes/skills` (the folders Omarchy uses for its own skills) |
 | `claude/` | Claude Code's own config | `~/.claude/settings.json`, `~/.claude/keybindings.json` |
+| `claude/agents/` | Claude Code subagent definitions for every project: the contractors (see [Subagents](#subagents)) | `~/.claude/agents`, one link per file |
 | `claude/managed-settings.json` | Claude Code's default model and effort, Opus at medium | Copied to `/etc/claude-code/managed-settings.json` |
 | `claude/hooks/` | Claude Code hooks: `session-state.py` (see [Long sessions](#long-sessions)) and `privacy-guard.py` (see [Privacy guard](#privacy-guard)) | Run from the repo by `claude/settings.json` |
 | `bin/` | Helper scripts | `~/.local/bin` |
@@ -146,7 +147,7 @@ To change the limits: the soft cap is `autoCompactWindow` and the idle threshold
 The research, the cost numbers and every decision so far are in `study/workspace/2026-10-subagent-design.md`. What's in place:
 
 - **Employees** are long-running experts for one project's domain. Each has a definition in that project's `.claude/agents/employee-<domain>.md`, with a one-hour cache, and a kit in `agents/employee-<domain>/`: its charter, curated facts, a log of every episode, and a note per open thread. An instance lasts one task; the kit is what carries over. `skills/employees/` tells a session when to use one and how to brief, continue or retire it. `employee-aibrain` in this repo is the example.
-- **Contractors**, the one-task agents, aren't defined yet.
+- **Contractors** do one task or a short chain, with no kit and a 5-minute cache. There's one type per model, in `claude/agents/`: `contractor-sonnet` (can't spawn agents), `contractor-opus` and `contractor-fable`. The session passes the effort on each spawn, so three types do the work of the nine model-and-effort types this design started from. `skills/contractors/` tells a session which type and effort suit a task, what a brief carries, and when to continue a contractor or start a fresh one.
 
 ## What else the script sets up
 

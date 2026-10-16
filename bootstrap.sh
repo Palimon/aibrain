@@ -75,6 +75,8 @@ TOOL_FILES=(
   "claude/settings.json:$HOME/.claude/settings.json"
   "claude/keybindings.json:$HOME/.claude/keybindings.json"
 )
+# Every Claude Code agent definition in claude/agents/, here and in the personal layer, is linked into
+# ~/.claude/agents
 # Every script in bin/, here and in the personal layer, is linked into ~/.local/bin
 
 # Run from the checkout? Then remember this copy, to skip the re-run when an update leaves it unchanged
@@ -391,15 +393,16 @@ if [[ -n "$save_computer" && "$(cat "$COMPUTER_FILE" 2>/dev/null)" != "$COMPUTER
 fi
 load_config
 
-# --- Links from the agent tools into the repos. A skill or script in the personal layer wins over one
-# here with the same name.
+# --- Links from the agent tools into the repos. A skill, agent or script in the personal layer wins over
+# one here with the same name.
 say "Linking agent tools to ~/Projects/aibrain and ~/Projects/aibrain-personal"
 instructions="$PERSONAL/AGENTS.md"
 [[ -e "$instructions" ]] || instructions="$AIBRAIN/personal.example/AGENTS.md"
 for f in "${INSTRUCTION_FILES[@]}"; do link "$instructions" "$f"; done
-declare -A skills=() scripts=()
+declare -A skills=() agents=() scripts=()
 for root in "$AIBRAIN" "$PERSONAL"; do
   for s in "$root"/skills/*/; do [[ -d "$s" ]] && s="${s%/}" && skills[$(basename "$s")]="$s"; done
+  for f in "$root"/claude/agents/*.md; do [[ -e "$f" ]] && agents[$(basename "$f")]="$f"; done
   for f in "$root"/bin/*; do [[ -e "$f" ]] && scripts[$(basename "$f")]="$f"; done
 done
 for d in "${SKILL_DIRS[@]}"; do
@@ -408,6 +411,9 @@ for d in "${SKILL_DIRS[@]}"; do
   prune "$d" "$AIBRAIN/skills" "$PERSONAL/skills"
 done
 for entry in "${TOOL_FILES[@]}"; do link "$AIBRAIN/${entry%%:*}" "${entry#*:}"; done
+mkdir -p "$HOME/.claude/agents"
+for n in "${!agents[@]}"; do link "${agents[$n]}" "$HOME/.claude/agents/$n"; done
+prune "$HOME/.claude/agents" "$AIBRAIN/claude/agents" "$PERSONAL/claude/agents"
 mkdir -p "$HOME/.local/bin"
 for n in "${!scripts[@]}"; do link "${scripts[$n]}" "$HOME/.local/bin/$n"; done
 prune "$HOME/.local/bin" "$AIBRAIN/bin" "$PERSONAL/bin" "$HOME/.claude/bin"
