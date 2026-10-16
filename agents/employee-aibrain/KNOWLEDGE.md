@@ -6,6 +6,7 @@ Facts the repo's own docs don't hold, each with its source. `AGENTS.md` and `REA
 
 - [Claude Code](#claude-code)
 - [Testing Claude Code sessions](#testing-claude-code-sessions)
+- [The privacy guard](#the-privacy-guard)
 
 ## Claude Code
 
@@ -25,3 +26,8 @@ Facts the repo's own docs don't hold, each with its source. `AGENTS.md` and `REA
 - `/autocompact <tokens>` saves into `~/.claude/settings.json` as `modelSettings.<model>.autoCompactWindow`, so it shows in aibrain's `git status`; bootstrap's reset of `modelSettings` puts it back. Source: 2026-10-15.
 - Claude Code's own helper agents (next-prompt suggestions, job summaries, the compaction summarizer) fire `SubagentStop` but not `SubagentStart`. In a session with a main agent (`--agent`, as background jobs run with `claude`) they carry that agent's type, not an empty one, and their `agent_transcript_path` never exists. A real subagent has a transcript at its stop, so the session-state hook logs only stops whose transcript or handback report exists. Source: raw hook input captured in a tmux session with `--agent claude`, 2026-10-15.
 - `tailscale status` can list a computer as offline while SSH to it works. Try SSH before deciding a computer is down. Source: observed 2026-10-15.
+
+## The privacy guard
+
+- `claude/hooks/privacy-guard.py` reads one shell command line at a time. A Bash command naming this repo that has `git` and then `--no-verify` on one line is refused even when the line is documentation inside a heredoc, so write such text with the Edit tool. Its first version matched `core.hooksPath` anywhere and refused a commit of this kit; it now refuses only setting, unsetting or overriding it. Source: 2026-10-15.
+- A fine-grained GitHub token without the Secrets permission gets `HTTP 403: Resource not accessible by personal access token` from `gh secret set` (on `actions/secrets/public-key`). Bootstrap's copy of the denylist to the `AIBRAIN_DENYLIST` secret needs Secrets and Variables write access on the token. Source: 2026-10-15.
