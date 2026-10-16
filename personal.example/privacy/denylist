@@ -1,0 +1,16 @@
+# What must never reach the public aibrain repo. Its privacy guard (privacy/scan.py, run by git hooks
+# and on GitHub) refuses any commit or push whose files, file names, messages or identities contain
+# one of these. The guard always catches email addresses, tokens, home folders with a user name,
+# tailnet names and private IP addresses; list here what only you know is yours.
+#
+# One entry per line:
+#   word or phrase      matched in any case, as a whole word where it starts or ends with one
+#   re:<regex>          a Python regular expression, matched in any case
+#   allow:<text>        text that's fine although it contains an entry
+#
+# Examples (remove the #):
+#Your Name
+#your-email-name
+#my-laptop
+#my-secret-project
+#re:\bbox\d{2}\b

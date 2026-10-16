@@ -1,0 +1,9 @@
+# SSH shortcuts for your computers and servers. bootstrap.sh puts an Include of this file at the top of
+# ~/.ssh/config, so these settings win over anything else there. Edit them here, not in ~/.ssh/config.
+
+# Your own computers, by their Tailscale names. Add one here when it joins the tailnet.
+#Host my-laptop my-desktop
+#    HostName %h.example.ts.net
+#    IdentityFile ~/.ssh/aibrain_fleet
+#    StrictHostKeyChecking accept-new
+#    ServerAliveInterval 60

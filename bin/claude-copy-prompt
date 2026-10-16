@@ -1,0 +1,9 @@
+#!/bin/bash
+# Used as Claude Code's $EDITOR: copy the unsent prompt to the clipboard and return immediately.
+log=/tmp/claude-copy-prompt.log
+file="${@: -1}"
+echo "$(date '+%T') args=[$*] file=$file size=$(wc -c < "$file" 2>&1)" >> "$log"
+# Detach wl-copy so it keeps serving the clipboard after Claude Code reaps this process
+setsid -f wl-copy < "$file" >> "$log" 2>&1
+notify-send -t 1500 "Claude Code" "Prompt copied to clipboard" 2>/dev/null
+exit 0

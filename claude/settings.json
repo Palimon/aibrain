@@ -1,0 +1,108 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "syncClaudeAiSkills": false,
+  "syncClaudeAiPlugins": false,
+  "autoMemoryEnabled": false,
+  "env": {
+    "EDITOR": "claude-copy-prompt",
+    "CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS": "150000"
+  },
+  "model": "opus",
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "medium"
+    }
+  },
+  "tui": "fullscreen",
+  "agentPushNotifEnabled": true,
+  "theme": "dark",
+  "autoCompactWindow": 150000,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/privacy-guard.py\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" PostToolUse"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" Stop"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" SubagentStart"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" SubagentStop"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" PreCompact"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" SessionStart"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+# Strings the generic rules in privacy/scan.py would flag but that are fine to publish. Each line is
+# matched against the whole flagged text: a literal string, or re:<regex>. This list can't loosen the
+# personal denylist. Add to it only for text that identifies nobody.
+noreply@anthropic.com
+git@github.com
+re:[\w.+-]+@users\.noreply\.github\.com
+re:[\w.+-]+@example\.(?:com|org|net)
+re:(?:[\w-]+\.)?example\.ts\.net

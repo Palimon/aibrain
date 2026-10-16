@@ -1,0 +1,5 @@
+#!/bin/bash
+# Privacy guard for this public repo: privacy/scan.py checks every commit, tag and file a push sends.
+# That also catches commits made with --no-verify.
+# bootstrap.sh installs it through core.hooksPath. Never bypass it (AGENTS.md, "Privacy").
+exec python3 -I "$(git rev-parse --show-toplevel)/privacy/scan.py" push

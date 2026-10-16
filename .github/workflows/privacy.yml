@@ -1,0 +1,30 @@
+# Privacy check on GitHub: the same scan as the local hooks (privacy/scan.py), over every commit, tag and
+# file, so a push from a computer without the hooks is still caught. The personal denylist comes from the
+# AIBRAIN_DENYLIST secret, which bootstrap.sh keeps in step with the personal layer; without it (a fork,
+# or a pull request from one) only the generic rules run. In CI the scan names the rule it hit, never
+# the matched text, because the logs of a public repo are public.
+name: privacy
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan every commit, tag and file
+        env:
+          AIBRAIN_DENYLIST_TEXT: ${{ secrets.AIBRAIN_DENYLIST }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python3 -I privacy/scan.py history
+          python3 -I privacy/scan.py tree HEAD
+          # A push can change the scanner itself, so the version it replaced checks the history too
+          if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE:privacy/scan.py" 2>/dev/null; then
+            mkdir -p "$RUNNER_TEMP/before/privacy"
+            git show "$BEFORE:privacy/scan.py" > "$RUNNER_TEMP/before/privacy/scan.py"
+            git show "$BEFORE:privacy/allow" > "$RUNNER_TEMP/before/privacy/allow" 2>/dev/null || true
+            python3 -I "$RUNNER_TEMP/before/privacy/scan.py" history
+          fi

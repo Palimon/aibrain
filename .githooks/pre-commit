@@ -1,0 +1,4 @@
+#!/bin/bash
+# Privacy guard for this public repo: privacy/scan.py checks the files being committed and the commit identity.
+# bootstrap.sh installs it through core.hooksPath. Never bypass it (AGENTS.md, "Privacy").
+exec python3 -I "$(git rev-parse --show-toplevel)/privacy/scan.py" staged

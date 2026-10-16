@@ -1,0 +1,11 @@
+#!/bin/bash
+# Ctrl+Super+Shift+A (bound by bootstrap.sh): Claude Code in bypass mode, started in this computer's OS agent
+# folder. That folder holds the OS agent's memory. bootstrap.sh picks it (OS_AGENT_DIRS in the personal
+# layer's config.sh, else ~/osagent) and records it in ~/.config/aibrain/os-agent-dir.
+# --dir prints the folder and exits.
+dir="$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/aibrain/os-agent-dir" 2>/dev/null)"
+[[ -n "$dir" ]] || dir="$HOME/osagent"
+if [[ "${1:-}" == --dir ]]; then echo "$dir"; exit 0; fi
+mkdir -p "$dir" && cd "$dir" || exit 1
+# Omarchy's own agent launcher uses this app id, so window rules and themes treat this window the same way
+exec omarchy-launch-tui --app-id=org.omarchy.agent claude --permission-mode bypassPermissions
