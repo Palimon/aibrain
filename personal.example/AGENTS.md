@@ -5,6 +5,7 @@
 # Memory
 
 - There's no automatic memory. What should outlast a session goes in files in the folder you work in: the project's repo, or the OS agent folder for this computer (`~/osagent`). Write it down as you learn it.
+- A fix for one computer that must outlast a reinstall goes in `~/Projects/aibrain-personal/computers/<name>/` (aibrain's README, "Computers"). `~/.config/aibrain/computer` holds this computer's name.
 - A project keeps its agent instructions in `AGENTS.md` at its root. Claude Code, Codex and Grok all read it.
 
 # Projects

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Ctrl+Super+Shift+A (bound by bootstrap.sh): Claude Code in bypass mode, started in this computer's OS agent
 # folder. That folder holds the OS agent's memory. bootstrap.sh picks it (OS_AGENT_DIRS in the personal
-# layer's config.sh, else ~/osagent) and records it in ~/.config/aibrain/os-agent-dir.
+# layer's config.sh or computers/<name>/config.sh, else ~/osagent) and records it in
+# ~/.config/aibrain/os-agent-dir.
 # --dir prints the folder and exits.
 dir="$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/aibrain/os-agent-dir" 2>/dev/null)"
 [[ -n "$dir" ]] || dir="$HOME/osagent"

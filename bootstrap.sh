@@ -4,8 +4,9 @@
 #
 # Two repos make the setup. This one, at ~/Projects/aibrain, is public and holds nothing personal.
 # Your personal layer, at ~/Projects/aibrain-personal, holds config.sh (the values below), your
-# instructions for every agent, SSH shortcuts and the privacy denylist. Agent tools get their setup
-# from both through symlinks, listed in the table below.
+# instructions for every agent, SSH shortcuts and the privacy denylist, and in computers/<name>/ what
+# differs on one computer. Agent tools get their setup from both through symlinks, listed in the table
+# below.
 #
 # Run it from ~/Projects/aibrain/bootstrap.sh, or before anything is cloned, from
 # the clipboard: bash <(wl-paste). Either way, once the checkout matches
@@ -26,28 +27,36 @@ PERSONAL="$HOME/Projects/aibrain-personal"
 TOKEN_FILE="$HOME/.config/op/aiagent-token"
 SETUP_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/aibrain/setup"   # light or full, chosen on the first run
 OS_AGENT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/aibrain/os-agent-dir"   # read by bin/aibrain-agent
+COMPUTER_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/aibrain/computer"   # this computer's name in the personal layer
 
-# --- Settings. These are the defaults; the personal layer's config.sh sets your own
-# (personal.example/config.sh lists them all).
-ENGINE_REPO=https://github.com/Palimon/aibrain.git   # where this repo comes from; a fork sets its own
-OP_VAULT=aiagents               # the 1Password vault the aiagent service account opens
-GH_ITEM_NAME="GitHub Agent"     # items in that vault
-SSH_KEY_ITEM_NAME="ssh fleet key"
-TS_KEY_ITEM="Tailscale auth key"
-GIT_NAME="" GIT_EMAIL=""        # git's global name and email; left alone when empty
-PUBLIC_GIT_NAME="" PUBLIC_GIT_EMAIL=""   # on commits to this public repo; empty: your GitHub login and noreply address
-GH_OWNER=""                     # whose repos a full setup clones; empty: the GitHub login
-SKIP_REPOS=()                   # repos a full setup doesn't clone
-TS_ROUTERS=()                   # subnet routers, each sharing its LAN with the tailnet: <Tailscale machine name>:<LAN>
-OS_AGENT_DIRS=()                # the OS agent's folder: the first of these that exists, else ~/osagent
-HYPR_IGNORE_KEY_UNKNOWN=""      # 1: Hyprland ignores unsupported key reports (README, "Unsupported keyboard reports")
-load_config() {
+# --- Settings. These are the defaults. The personal layer's config.sh sets your own for every computer,
+# and computers/<name>/config.sh sets them for one computer, on top (personal.example lists them all).
+defaults() {
+  ENGINE_REPO=https://github.com/Palimon/aibrain.git   # where this repo comes from; a fork sets its own
+  OP_VAULT=aiagents               # the 1Password vault the aiagent service account opens
+  GH_ITEM_NAME="GitHub Agent"     # items in that vault
+  SSH_KEY_ITEM_NAME="ssh fleet key"
+  TS_KEY_ITEM="Tailscale auth key"
+  GIT_NAME="" GIT_EMAIL=""        # git's global name and email; left alone when empty
+  PUBLIC_GIT_NAME="" PUBLIC_GIT_EMAIL=""   # on commits to this public repo; empty: your GitHub login and noreply address
+  GH_OWNER=""                     # whose repos a full setup clones; empty: the GitHub login
+  SKIP_REPOS=()                   # repos a full setup doesn't clone
+  # Usually set for one computer:
+  TS_SHARE_LAN=""                 # the LAN this computer shares with the tailnet as a subnet router, e.g. 192.0.2.0/24
+  OS_AGENT_DIRS=()                # the OS agent's folder: the first of these that exists, else ~/osagent
+  HYPR_IGNORE_KEY_UNKNOWN=""      # 1: Hyprland ignores unsupported key reports (README, "Unsupported keyboard reports")
+}
+load_config() { # the defaults, then config.sh, then this computer's config.sh
+  defaults
   # shellcheck source=/dev/null
   if [[ -r "$PERSONAL/config.sh" ]]; then source "$PERSONAL/config.sh"; fi
+  # shellcheck source=/dev/null
+  if [[ -n "$COMPUTER" && -r "$PERSONAL/computers/$COMPUTER/config.sh" ]]; then source "$PERSONAL/computers/$COMPUTER/config.sh"; fi
   REPO="${AIBRAIN_REPO:-$ENGINE_REPO}"   # AIBRAIN_REPO: only to test unpushed changes
   GH_ITEM="op://$OP_VAULT/$GH_ITEM_NAME/credential"
   SSH_KEY_ITEM="op://$OP_VAULT/$SSH_KEY_ITEM_NAME"
 }
+COMPUTER="${AIBRAIN_COMPUTER:-$(cat "$COMPUTER_FILE" 2>/dev/null || true)}"   # settled once the personal layer is up to date
 load_config
 
 # --- What links where. Adding a tool means adding its paths here.
@@ -292,6 +301,7 @@ elif [[ ! -e "$PERSONAL" ]]; then
   cp -r "$AIBRAIN/personal.example" "$PERSONAL"
   warn "Made a personal layer in ~/Projects/aibrain-personal from personal.example. Fill in its config.sh, AGENTS.md and privacy/denylist, keep it in a private repo of your own, and run this again."
 fi
+
 load_config
 
 # --- git: your name and email, and for this public repo the privacy guard's hooks (privacy/scan.py,
@@ -310,6 +320,76 @@ fi
 if ! (cd "$AIBRAIN" && python3 -I privacy/scan.py tree HEAD >/dev/null 2>&1); then
   warn "The privacy scan of ~/Projects/aibrain fails: personal details are committed there, or the scan can't run (for example, the personal layer has no privacy/denylist). Check: cd ~/Projects/aibrain && python3 -I privacy/scan.py tree"
 fi
+
+# --- This computer's name. Every computer has a folder in the personal layer, computers/<name>/, where
+# config.sh sets settings for it alone and setup.sh runs at the end. The name is AIBRAIN_COMPUTER when
+# set, else the one an earlier run saved in ~/.config/aibrain/computer. With neither, as on a fresh
+# install, a run in a terminal asks whether this is a new computer or one set up again after a
+# reinstall: an existing one is picked from a list, and a new one gets a name, the hostname by default.
+# A name without a folder gets one, committed to the personal repo and pushed, so every computer and
+# every reinstall knows it. Without a terminal the name is the hostname, unsaved and without a folder,
+# so a later run in a terminal still asks.
+computer_about() { # computer_about <name>: what the first line of its config.sh says about it
+  local line; line="$(head -n 1 "$PERSONAL/computers/$1/config.sh" 2>/dev/null || true)"
+  if [[ "$line" == "# $1: "* ]]; then echo "${line#"# $1: "}"; fi
+}
+host="$(uname -n)"; host="${host%%.*}"; host="${host,,}"; host="${host//[^a-z0-9-]/-}"
+COMPUTER="${AIBRAIN_COMPUTER:-$(cat "$COMPUTER_FILE" 2>/dev/null || true)}" save_computer=1
+if [[ -z "$COMPUTER" ]] && have_tty; then
+  computers=(); for d in "$PERSONAL"/computers/*/; do [[ -d "$d" ]] && computers+=("$(basename "$d")"); done
+  kind=new
+  while ((${#computers[@]})); do
+    read -rp "Is this a brand new computer, or one you're setting up again after a reinstall? [new/existing]: " kind </dev/tty
+    [[ "$kind" != new && "$kind" != existing ]] || break
+  done
+  if [[ "$kind" == existing ]]; then
+    echo "Your computers:" >/dev/tty
+    for i in "${!computers[@]}"; do
+      about="$(computer_about "${computers[i]}")"
+      printf '  %d) %s%s\n' "$((i + 1))" "${computers[i]}" "${about:+  ($about)}" >/dev/tty
+    done
+    while :; do
+      read -rp "Which one is this? [1-${#computers[@]}]: " i </dev/tty
+      [[ ! "$i" =~ ^[0-9]+$ ]] || ((10#$i < 1 || 10#$i > ${#computers[@]})) || break
+    done
+    COMPUTER="${computers[10#$i - 1]}"
+  else
+    while :; do
+      read -rp "A name for it, in lowercase letters, digits and dashes [$host]: " COMPUTER </dev/tty
+      COMPUTER="${COMPUTER:-$host}"
+      if [[ ! "$COMPUTER" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+        echo "Use lowercase letters, digits and dashes." >/dev/tty
+      elif [[ -d "$PERSONAL/computers/$COMPUTER" ]]; then
+        echo "Another computer is already called $COMPUTER." >/dev/tty
+      else
+        break
+      fi
+    done
+  fi
+elif [[ -z "$COMPUTER" ]]; then
+  COMPUTER="$host" save_computer=""
+  warn "This computer has no name in the personal layer yet, so it gets no settings of its own. Run this once in a terminal, or with AIBRAIN_COMPUTER=<name>."
+fi
+[[ "$COMPUTER" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "A computer name is lowercase letters, digits and dashes, not \"$COMPUTER\"."
+if [[ -n "$save_computer" && ! -d "$PERSONAL/computers/$COMPUTER" ]]; then
+  say "Adding $COMPUTER to your computers in ~/Projects/aibrain-personal"
+  about="$(hostnamectl --json=short 2>/dev/null |
+    jq -r '[.HardwareVendor, .HardwareModel, .Chassis] | map(select(. != null and . != "")) | join(" ")' 2>/dev/null || true)"
+  mkdir -p "$PERSONAL/computers/$COMPUTER"
+  printf '%s\n' "# $COMPUTER: ${about:-a computer}, added $(date +%F)" \
+    "# Settings for this computer alone, read after ../../config.sh. Steps of its own go in setup.sh here." \
+    '# See the aibrain README, "Computers".' > "$PERSONAL/computers/$COMPUTER/config.sh"
+  if [[ -e "$PERSONAL/.git" ]]; then
+    git -C "$PERSONAL" add -- "computers/$COMPUTER" &&
+      git -C "$PERSONAL" commit -q -m "computers/$COMPUTER: a new computer" -- "computers/$COMPUTER" &&
+      git -C "$PERSONAL" push -q ||
+      warn "Couldn't commit and push computers/$COMPUTER in ~/Projects/aibrain-personal. Do that there by hand, so a reinstall can find this computer."
+  fi
+fi
+if [[ -n "$save_computer" && "$(cat "$COMPUTER_FILE" 2>/dev/null)" != "$COMPUTER" ]]; then
+  mkdir -p "$(dirname "$COMPUTER_FILE")" && printf '%s\n' "$COMPUTER" > "$COMPUTER_FILE"
+fi
+load_config
 
 # --- Links from the agent tools into the repos. A skill or script in the personal layer wins over one
 # here with the same name.
@@ -462,6 +542,8 @@ mkdir -p "$os_dir" "$(dirname "$OS_AGENT_FILE")"
 # OS agent
 
 This folder is the memory of the agent that looks after this computer: its setup, hardware, problems and open work. Keep what you learn here as files, one topic per `.md`, and keep this file pointing to them. Open work goes in `NEXT-STEPS.md`.
+
+A fix that must outlast a reinstall goes in the personal layer, in `computers/<name>/`, as aibrain's README describes under "Computers". `~/.config/aibrain/computer` holds this computer's name; without that file, the name is the hostname.
 EOF
 HYPR_BINDINGS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
 hypr_block='-- >>> aibrain >>>
@@ -499,24 +581,19 @@ fi
 # Tailscale is set up (its `tailscale up --accept-routes` then fails on the operator setting), so
 # this does its steps one at a time, each only when it isn't done yet. It joins with the
 # "Tailscale auth key" item in the vault when there is one, and otherwise with a browser login.
-# A machine in TS_ROUTERS shares its LAN instead: it advertises the LAN, forwards IPv4 for it, and
-# doesn't accept routes, because it reaches that LAN directly. Its route needs approving once in the
-# admin console.
+# A computer with TS_SHARE_LAN set shares that LAN instead: it advertises the LAN, forwards IPv4 for
+# it, and doesn't accept routes, because it reaches that LAN directly. Its route needs approving once
+# in the admin console.
 TS_SYSCTL=/etc/sysctl.d/99-aibrain-tailscale.conf
 ts_up() { [[ "$(tailscale status --json 2>/dev/null | jq -r '.BackendState // empty')" == Running ]]; }
 ts_prefs() { tailscale debug prefs 2>/dev/null || true; }
-ts_lan() { # the LAN this machine shares, looked up in TS_ROUTERS by its Tailscale name; empty if none
-  local name e
-  name="$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' || true)"; name="${name%%.*}"
-  for e in "${TS_ROUTERS[@]}"; do if [[ -n "$name" && "${e%%:*}" == "$name" ]]; then echo "${e#*:}"; fi; done
-}
-ts_accept() { if [[ -n "$(ts_lan)" ]]; then echo false; else echo true; fi; }
+ts_accept() { if [[ -n "$TS_SHARE_LAN" ]]; then echo false; else echo true; fi; }
 ts_prefs_ok() {
-  [[ "$(ts_prefs | jq -r '[.OperatorUser, .RouteAll, ((.AdvertiseRoutes // []) | join(","))] | map(tostring) | join("|")')" == "$USER|$(ts_accept)|$(ts_lan)" ]]
+  [[ "$(ts_prefs | jq -r '[.OperatorUser, .RouteAll, ((.AdvertiseRoutes // []) | join(","))] | map(tostring) | join("|")')" == "$USER|$(ts_accept)|$TS_SHARE_LAN" ]]
 }
 ts_sysctl() { printf '# Managed by ~/Projects/aibrain/bootstrap.sh: this machine routes %s onto the tailnet.\nnet.ipv4.ip_forward = 1\n' "$1"; }
 ts_fwd_ok() { # forwarding on for a subnet router, and no forwarding file of ours anywhere else
-  local lan; lan="$(ts_lan)"
+  local lan="$TS_SHARE_LAN"
   if [[ -n "$lan" ]]; then
     [[ "$(cat "$TS_SYSCTL" 2>/dev/null)" == "$(ts_sysctl "$lan")" && "$(sysctl -n net.ipv4.ip_forward)" == 1 ]]
   else
@@ -534,9 +611,10 @@ if omarchy-pkg-missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok ||
     if ! ts_up; then
       # --reset so joining leaves exactly these settings, whatever an earlier setup left behind
       up=(sudo tailscale up --reset --accept-routes --operator="$USER")
-      # --reset also drops a machine name given with --hostname. Keep it, so TS_ROUTERS still matches.
+      # --reset also drops a machine name given with --hostname. Keep it; a first join uses this
+      # computer's name, so after a reinstall the tailnet knows it by its old name again.
       ts_host="$(ts_prefs | jq -r '.Hostname // empty')"
-      [[ -z "$ts_host" ]] || up+=(--hostname="$ts_host")
+      up+=(--hostname="${ts_host:-$COMPUTER}")
       if op item get "$TS_KEY_ITEM" --vault "$OP_VAULT" >/dev/null 2>&1; then
         op read "op://$OP_VAULT/$TS_KEY_ITEM/credential" | "${up[@]}" --auth-key=file:/dev/stdin --timeout=60s ||
           warn "The Tailscale auth key in 1Password didn't work. It may have expired: put a new one in the \"$TS_KEY_ITEM\" item."
@@ -550,7 +628,7 @@ if omarchy-pkg-missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok ||
       fi
     fi
     if ts_up; then
-      lan="$(ts_lan)"
+      lan="$TS_SHARE_LAN"
       if ! ts_fwd_ok; then
         if [[ -n "$lan" ]]; then
           ts_sysctl "$lan" | sudo tee "$TS_SYSCTL" >/dev/null
@@ -611,6 +689,15 @@ if [[ "$REPO" =~ ^https://github\.com/([^/]+/[^/]+)$ && -s "$PERSONAL/privacy/de
     fi
   fi
 fi
+
+# --- Your own steps, for what no setting covers: the personal layer's setup.sh on every computer, then
+# computers/<name>/setup.sh on this one. Like this script, each must change nothing on a second run.
+# They get AIBRAIN, PERSONAL, COMPUTER and BACKUP; one that fails gets a warning, and the run goes on.
+for f in "$PERSONAL/setup.sh" "$PERSONAL/computers/$COMPUTER/setup.sh"; do
+  [[ -f "$f" ]] || continue
+  AIBRAIN="$AIBRAIN" PERSONAL="$PERSONAL" COMPUTER="$COMPUTER" BACKUP="$BACKUP" bash "$f" ||
+    warn "${f#"$HOME"/} failed (exit $?)."
+done
 
 [[ -d "$BACKUP" ]] && warn "Files this run replaced are saved in $BACKUP"
 say "aibrain setup complete. New terminals pick up the aiagent token."

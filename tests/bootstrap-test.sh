@@ -2,10 +2,10 @@
 # Runs bootstrap.sh in throwaway homes on tmpfs, so a change can be tested without touching the real
 # home. Each scenario runs the script twice and checks the second run changes nothing.
 # Needs OP_SERVICE_ACCOUNT_TOKEN set (every shell has it). Tests the last commit in this checkout.
-# Usage: tests/bootstrap-test.sh fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|all
+# Usage: tests/bootstrap-test.sh fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|all
 #
 # Each home gets a personal layer cloned from a fixture made from personal.example, except in
-# no-personal (none, so the script makes one) and full, which clones your own personal layer
+# no-personal (none, so the script makes one) and full, which clones a copy of your own personal layer
 # (AIBRAIN_TEST_PERSONAL, default ~/Projects/aibrain-personal, its committed state) and the small repo
 # its config.sh names in TEST_REPO. Without those, full is skipped.
 #
@@ -21,15 +21,21 @@ FIXTURE="$ROOT/personal-fixture"
 trap 'rm -rf "$ROOT"' EXIT                   # the homes hold copies of the token
 mkdir -p "$ROOT"; git -C "$SRC" show HEAD:bootstrap.sh > "$ROOT/pasted.sh"
 
-mkfixture() { # a personal layer repo: personal.example as committed, with test values and a skill of its own
+mkfixture() { # a personal layer repo: personal.example as committed, with test values, a skill of its own, a
+  # setup.sh for every computer, and a computer named test-box with a setting and a setup.sh of its own
   rm -rf "$FIXTURE"; mkdir -p "$FIXTURE"
   git -C "$SRC" archive HEAD personal.example | tar -x -C "$FIXTURE" --strip-components=1
-  printf '%s\n' 'GIT_NAME="Test User"' 'GIT_EMAIL="test@example.com"' 'HYPR_IGNORE_KEY_UNKNOWN=1' >> "$FIXTURE/config.sh"
+  printf '%s\n' 'GIT_NAME="Test User"' 'GIT_EMAIL="test@example.com"' >> "$FIXTURE/config.sh"
+  printf '%s\n' 'mkdir -p "$HOME/setup-ran" && touch "$HOME/setup-ran/every-computer"' > "$FIXTURE/setup.sh"
+  mkdir -p "$FIXTURE/computers/test-box"
+  printf '%s\n' '# test-box: a test computer, added 2026-01-01' 'HYPR_IGNORE_KEY_UNKNOWN=1' > "$FIXTURE/computers/test-box/config.sh"
+  printf '%s\n' 'mkdir -p "$HOME/setup-ran" && printf "%s %s\n" "$COMPUTER" "$PERSONAL" > "$HOME/setup-ran/test-box"' > "$FIXTURE/computers/test-box/setup.sh"
   printf '%s\n' 're:\bxyzzy-fixture-term\b' >> "$FIXTURE/privacy/denylist"
   mkdir -p "$FIXTURE/skills/fixture-skill"
   printf '%s\n' '---' 'name: fixture-skill' 'description: A personal skill.' '---' > "$FIXTURE/skills/fixture-skill/SKILL.md"
   git -C "$FIXTURE" init -q -b main && git -C "$FIXTURE" add -A &&
     git -C "$FIXTURE" -c user.name=t -c user.email=t@example.com commit -qm fixture
+  git -C "$FIXTURE" config receive.denyCurrentBranch updateInstead   # the script pushes a new computer's folder
 }
 mkfixture
 
@@ -80,6 +86,8 @@ snap() {
   echo "aibrain git: hooks=$(git -C "$A" config core.hooksPath) identity=$(git -C "$A" config user.name) <$(git -C "$A" config user.email)>"
   echo "aibrain-personal: $(git -C "$P" rev-parse --short HEAD 2>/dev/null || echo not-a-repo) dirty=[$(git -C "$P" status --porcelain 2>/dev/null | tr '\n' ' ')] files=[$(cd "$P" 2>/dev/null && find . -type f -not -path './.git/*' | sort | tr '\n' ' ')]"
   echo "os agent: $(sed "s#$H#~#" "$H/.config/aibrain/os-agent-dir" 2>/dev/null)"
+  echo "computer: $(cat "$H/.config/aibrain/computer" 2>/dev/null || echo unsaved)"
+  echo "setup.sh ran: $(ls "$H/setup-ran" 2>/dev/null | tr '\n' ' ')"
   hook_state
 }
 hook_state() { # run the Stop hook exactly as the linked settings.json wires it, as this home's user
@@ -117,7 +125,7 @@ check_twice() {
 show() { echo "--- end state"; cat "$H.snap2"; echo "--- backups"; (cd "$H/.local/state/aibrain" 2>/dev/null && find . -maxdepth 3 | sort | head -30); }
 
 if [[ "${1:-}" == all ]]; then
-  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks; do echo "######## $s"; "$0" "$s"; done; exit
+  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers; do echo "######## $s"; "$0" "$s"; done; exit
 fi
 case "${1:-}" in
 fresh)
@@ -163,7 +171,7 @@ full)
   # the clone to the one small repo its config.sh names.
   test_repo="$(git -C "$REAL_PERSONAL" show HEAD:config.sh 2>/dev/null | bash -c 'source /dev/stdin >/dev/null 2>&1; echo "${TEST_REPO:-}"')"
   if [[ -z "$test_repo" ]]; then echo "SKIPPED: no TEST_REPO in $REAL_PERSONAL/config.sh"; exit 0; fi
-  mkhome full; PERSONAL_REPO="$REAL_PERSONAL"
+  mkhome full; git clone -q --bare "$REAL_PERSONAL" "$ROOT/personal-copy.git"; PERSONAL_REPO="$ROOT/personal-copy.git"
   EXTRA_ENV=(AIBRAIN_SETUP=full AIBRAIN_REPOS_ONLY="$test_repo")
   echo "--- run 1 (pasted, agent token, full)"; run 1 "$ROOT/pasted.sh"
   EXTRA_ENV=(AIBRAIN_REPOS_ONLY="$test_repo"); check_twice; show
@@ -171,8 +179,9 @@ full)
   ;;
 unknown-key-binding)
   # Replace an older managed block containing a filter with incomplete flags.
-  # Keep the user's own bindings and ensure a second bootstrap adds no duplicate.
-  mkhome unknown-key-binding
+  # Keep the user's own bindings and ensure a second bootstrap adds no duplicate. The filter is
+  # test-box's setting, so the first run names the computer; the second finds the saved name.
+  mkhome unknown-key-binding; EXTRA_ENV=(AIBRAIN_COMPUTER=test-box)
   cat >> "$H/.config/hypr/bindings.lua" <<'EOF'
 
 -- >>> aibrain >>>
@@ -188,7 +197,7 @@ EOF
   else
     echo "UNKNOWN_KEY_FILTER: NO"; exit 1
   fi
-  check_twice; show
+  EXTRA_ENV=(); check_twice; show
   ;;
 picks)
   # Model and effort picks saved by Claude Code's pickers are put back, not stashed; other edits are stashed.
@@ -209,5 +218,41 @@ PY
   fi
   check_twice; show
   ;;
-*) echo "Usage: $0 fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|all" >&2; exit 2 ;;
+computers)
+  # Every computer has a folder in the personal layer, computers/<name>/. With no terminal and no name,
+  # the computer is the hostname, unsaved, with a warning, and only the layer's setup.sh runs.
+  # AIBRAIN_COMPUTER names it and is saved, so its config.sh and setup.sh apply on later runs without it.
+  # A new name gets a folder, committed and pushed once. (The questions asked in a terminal can't be
+  # tested here.)
+  mkhome computers; ok=1; B="$H/.config/hypr/bindings.lua" C="$H/.config/aibrain/computer"
+  head0="$(git -C "$FIXTURE" rev-parse HEAD)"
+  echo "--- run 1 (pasted, agent token, no name)"; run 1 "$ROOT/pasted.sh" | grep -v '^==>' | tee "$H.run1"
+  if [[ -e "$C" ]] || grep -q code:248 "$B" || [[ "$(ls "$H/setup-ran" | tr '\n' ' ')" != "every-computer " ]] ||
+     ! grep -q 'has no name in the personal layer yet' "$H.run1"; then
+    ok=0; echo "unnamed: wrong"
+  fi
+  EXTRA_ENV=(AIBRAIN_COMPUTER=test-box)
+  echo "--- run 2 (checkout, AIBRAIN_COMPUTER=test-box)"; run 0 "$H/Projects/aibrain/bootstrap.sh" | grep -v '^==>'
+  if [[ "$(cat "$C")" != test-box ]] || ! grep -q code:248 "$B" ||
+     [[ "$(cat "$H/setup-ran/test-box")" != "test-box $H/Projects/aibrain-personal" ]]; then
+    ok=0; echo "named: wrong"
+  fi
+  EXTRA_ENV=(); check_twice
+  grep -q code:248 "$B" || { ok=0; echo "saved name: wrong"; }
+  [[ "$(git -C "$FIXTURE" rev-parse HEAD)" == "$head0" ]] || { ok=0; echo "existing computer: pushed a commit"; }
+  EXTRA_ENV=(AIBRAIN_COMPUTER=new-box)
+  echo "--- run (AIBRAIN_COMPUTER=new-box, a new computer)"; run 0 "$H/Projects/aibrain/bootstrap.sh" | grep -v '^==>'
+  head1="$(git -C "$FIXTURE" rev-parse HEAD)"
+  if [[ "$(cat "$C")" != new-box ]] || grep -q code:248 "$B" ||
+     [[ "$(git -C "$FIXTURE" log -1 --format=%s)" != "computers/new-box: a new computer" ]] ||
+     [[ "$(git -C "$FIXTURE" show HEAD:computers/new-box/config.sh | head -n 1)" != "# new-box: "*", added "* ]]; then
+    ok=0; echo "new computer: wrong"
+  fi
+  EXTRA_ENV=()
+  echo "--- run (saved new-box)"; run 0 "$H/Projects/aibrain/bootstrap.sh" | grep -v '^==>'
+  [[ "$(git -C "$FIXTURE" rev-parse HEAD)" == "$head1" ]] || { ok=0; echo "new computer: pushed again"; }
+  if ((ok)); then echo "COMPUTERS: yes"; else echo "COMPUTERS: NO"; fi
+  show
+  ;;
+*) echo "Usage: $0 fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|all" >&2; exit 2 ;;
 esac

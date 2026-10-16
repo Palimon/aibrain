@@ -47,12 +47,13 @@ Answer what it asks. Depending on what the computer already has, that's some of:
 1. **Your password**, for the last time. The script makes sudo passwordless, so agents can change the system without asking.
 2. **Light or full.** Light sets up the agent tools. Full also clones every repo on your GitHub account into `~/Projects`. The answer is saved, so it's only asked once. To switch a computer later, run `AIBRAIN_SETUP=full ~/Projects/aibrain/bootstrap.sh`.
 3. **The aiagent token.** Copy it from the 1Password tab, paste it, and press Enter. The terminal doesn't show what you paste.
-4. **The Tailscale login.** The terminal shows a login.tailscale.com link. Open it and sign in. This is skipped when the vault has a "Tailscale auth key" item.
-5. **The Claude login.** A browser page opens. Sign in with your claude.ai account.
+4. **New computer or existing?** For one you're setting up again after a reinstall, answer existing and pick it from the list; it gets its settings back. For a new one, give it a name. It's asked once (see "Computers").
+5. **The Tailscale login.** The terminal shows a login.tailscale.com link. Open it and sign in. This is skipped when the vault has a "Tailscale auth key" item.
+6. **The Claude login.** A browser page opens. Sign in with your claude.ai account.
 
 It ends with "aibrain setup complete." Open a new terminal and start your agent, for example `claude`, or press Ctrl+Super+Shift+A for the OS agent. Codex asks you to log in the first time you run `codex`.
 
-An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a terminal it can't ask for anything, so it needs `OP_SERVICE_ACCOUNT_TOKEN` set and the 1Password CLI already installed. It sets up light unless the computer has a saved choice or `AIBRAIN_SETUP` is set.
+An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a terminal it can't ask for anything, so it needs `OP_SERVICE_ACCOUNT_TOKEN` set and the 1Password CLI already installed. It sets up light unless the computer has a saved choice or `AIBRAIN_SETUP` is set, and `AIBRAIN_COMPUTER=<name>` tells it which computer it's on.
 
 ## Your personal layer
 
@@ -60,7 +61,9 @@ An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a termina
 
 | Path | What it is |
 |---|---|
-| `config.sh` | Your values for `bootstrap.sh`: git identity, the identity for commits to this repo, vault and item names, which repos to clone, subnet routers, the OS agent's folder. Every setting and its default is listed in the template. |
+| `config.sh` | Your values for `bootstrap.sh` on every computer: git identity, the identity for commits to this repo, vault and item names, which repos to clone. Every setting and its default is listed in the template. |
+| `computers/<name>/` | What differs on one computer: settings in `config.sh`, and steps of your own in `setup.sh`. See "Computers" below. |
+| `setup.sh` | Optional: steps of your own that `bootstrap.sh` runs at the end, on every computer |
 | `AGENTS.md` | Your instructions for every agent, linked as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` and `~/.grok/AGENTS.md` |
 | `ssh/config` | SSH shortcuts to your computers and servers, included at the top of `~/.ssh/config` |
 | `privacy/denylist` | Names, addresses and anything else of yours that must never reach this repo |
@@ -68,6 +71,22 @@ An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a termina
 | `NEXT-STEPS.md` | Your open work on the setup |
 
 The script finds the layer's repo in this order: `AIBRAIN_PERSONAL_REPO` when set (a URL or a path, or `none` for a plain folder), the existing checkout's own remote, then `aibrain-personal` on the GitHub account the script logs in as. It keeps the checkout up to date the same way as this repo's.
+
+### Computers
+
+Every computer has a folder in the personal layer, named after it, for what differs on that computer alone. The script adds the folder for a new computer, commits it and pushes it, so every run applies it again, and so does the first run after a reinstall:
+
+- `computers/<name>/config.sh` sets settings for that computer on top of `config.sh`. Its first line says what the computer is (hardware and the date it was added). Any setting can go there. These usually do: `TS_SHARE_LAN` on the computer that shares your LAN with the tailnet, `OS_AGENT_DIRS` on one that keeps the OS agent's memory on another disk, and `HYPR_IGNORE_KEY_UNKNOWN` on one whose keyboard needs it.
+- `computers/<name>/setup.sh` holds steps that no setting covers, such as a kernel module option or a package only that computer needs. The layer's own `setup.sh` does the same for every computer. Both run at the end of each `bootstrap.sh` run, with `AIBRAIN`, `PERSONAL`, `COMPUTER` and `BACKUP` set, so like the script, each step must change nothing on a second run. `personal.example/computers/README.md` has examples.
+
+The script saves the computer's name in `~/.config/aibrain/computer` and asks only when that file is missing, as on a fresh install:
+- **New or existing?** "Existing" is a computer set up again after a reinstall: pick it from the list of your computers, and it gets its settings back. "New" asks for a name (the hostname by default; lowercase letters, digits and dashes) and adds its folder. The computer's Tailscale name is a good choice.
+- `AIBRAIN_COMPUTER=<name>` answers without asking, with an existing name or a new one.
+- Without a terminal and without a name, the script uses the hostname, saves nothing, adds no folder, and warns, so a later run in a terminal still asks.
+
+When Tailscale isn't set up yet, the computer joins under its name. To get a reinstalled computer's old name back in Tailscale, remove the old machine in the admin console before that run.
+
+When an agent fixes something on one computer, the fix goes in that computer's folder: as a setting if the engine has one, otherwise as a step in its `setup.sh`. A fix that would help other people belongs in this repo as a setting that's off by default, like `HYPR_IGNORE_KEY_UNKNOWN`.
 
 ## Privacy guard
 
@@ -143,7 +162,7 @@ The research, the cost numbers and every decision so far are in `study/workspace
 - An SSH server that takes key logins only. ufw keeps it closed to the LAN, and your other computers reach it over Tailscale.
 - The OS agent: Ctrl+Super+Shift+A opens Claude Code in bypass mode in the OS agent's folder: the first folder in `OS_AGENT_DIRS` that exists, otherwise `~/osagent`. The folder is the agent's memory for that computer, and a new one starts with a short `AGENTS.md`.
 - Claude Code's trust for the OS agent folder and every repo in `~/Projects`, so it doesn't ask before the first session in each.
-- Tailscale, set up the way Omarchy's own installer does it. The computer joins your tailnet with routes accepted, you can run `tailscale` without sudo, Taildrop files land in `~/Downloads`, the bar gets a Tailscale widget, and the launcher gets the admin console as a web app. A computer listed in `TS_ROUTERS` shares its home LAN with the tailnet instead of accepting routes. When a computer is first added there, approve its route in the admin console: Machines, then the computer, then Edit route settings.
+- Tailscale, set up the way Omarchy's own installer does it. The computer joins your tailnet with routes accepted, you can run `tailscale` without sudo, Taildrop files land in `~/Downloads`, the bar gets a Tailscale widget, and the launcher gets the admin console as a web app. A computer with `TS_SHARE_LAN` set, in its `computers/<name>/config.sh`, shares that LAN with the tailnet instead of accepting routes. When it's first set, approve the route in the admin console: Machines, then the computer, then Edit route settings.
 - The Claude Code login.
 
 What it does with what's already there:
@@ -179,7 +198,7 @@ Any change to the setup goes into `bootstrap.sh` in the same commit, so every co
 
 ## Unsupported keyboard reports
 
-Some keyboards send KEY_UNKNOWN reports (XKB code 248), which can stick in Hyprland's pressed-key list and turn into NUL characters in apps such as ChatGPT when focus changes. With `HYPR_IGNORE_KEY_UNKNOWN=1` in `config.sh`, the script adds a Hyprland binding that consumes these reports before they reach that list. Normal typing is unaffected. It doesn't clear a key that is already stuck.
+Some keyboards send KEY_UNKNOWN reports (XKB code 248), which can stick in Hyprland's pressed-key list and turn into NUL characters in apps such as ChatGPT when focus changes. With `HYPR_IGNORE_KEY_UNKNOWN=1` in the `config.sh` of the computer with that keyboard (`computers/<name>/config.sh`), the script adds a Hyprland binding that consumes these reports before they reach that list. Normal typing is unaffected. It doesn't clear a key that is already stuck.
 
 ## License
 
