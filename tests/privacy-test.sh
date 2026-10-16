@@ -113,7 +113,12 @@ check "guard refuses --no-verify in the repo" test "$(guard 'git commit --no-ver
 check "guard refuses commit -n in the repo" test "$(guard 'git commit -anm x' "$PUB/tests")" = deny
 check "guard refuses a hooksPath override naming the repo" test "$(guard 'git -C ~/Projects/aibrain -c core.hooksPath=/dev/null push' "$W")" = deny
 check "guard refuses --no-verify on a push naming the repo" test "$(guard 'cd $HOME/Projects/aibrain && git push --no-verify' "$W")" = deny
+check "guard refuses setting hooksPath" test "$(guard 'git config core.hooksPath /dev/null' "$PUB")" = deny
+check "guard refuses unsetting hooksPath" test "$(guard 'git config --unset core.hooksPath' "$PUB")" = deny
+check "guard refuses hooksPath through the environment" test "$(guard "GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/x'\" git commit -m x" "$PUB")" = deny
 check "guard allows a normal commit" test -z "$(guard 'git commit --amend -m "fix"' "$PUB")"
+check "guard allows reading hooksPath" test -z "$(guard 'git config core.hooksPath' "$PUB")"
+check "guard allows text that mentions hooksPath" test -z "$(guard $'printf "core.hooksPath is set by bootstrap\\n" >> notes.md\ngit add notes.md && git commit -m notes' "$PUB")"
 check "guard leaves the personal layer alone" test -z "$(guard 'git commit --no-verify -m x' "$HOME/Projects/aibrain-personal")"
 check "guard leaves other repos alone" test -z "$(guard 'git commit --no-verify -m x' "$W")"
 
