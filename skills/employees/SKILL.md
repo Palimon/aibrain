@@ -45,7 +45,7 @@ When an instance stops, decide in the same turn: send it everything queued for i
 You can't see how much time has passed, so a hook (`claude/hooks/agent-cache.py`) checks each continue. It holds the message once if the instance's cache has gone cold or its context is past 150k, and tells you how long it has been idle and how big it is. Decide by the rules below, then start fresh or send the message again.
 
 - **Warm** (stopped under about 55 minutes ago): continue it while its context is under about 150k tokens. Past 150k, continue only for a short follow-up (a few requests); otherwise start fresh from the kit and the thread note. The 150k line keeps instances in the range where the model works well, not only where the cache pays.
-- **Cold** (over about 55 minutes): start fresh. A cold continue re-writes the whole context at the cache-write price, and the fresh instance restarts small.
+- **Cold** (over about 55 minutes): start fresh. A cold continue re-writes nearly the whole context at the cache-write price, and the fresh instance restarts small.
 - **Every continue** pastes the thread's standing directives again. Directives from the original brief get lost across repeated resumes.
 - The context size at a stop is the `subagent_tokens` figure in its stop notification.
 

@@ -4,7 +4,8 @@
 A prompt cache stays warm while an agent keeps making requests, however long it runs. It goes
 cold only when the agent's context sits unused for longer than its lifetime (5 minutes, or an
 hour for an agent file with `cacheTtl: 1h`) and is then needed again, and the next request
-re-writes the whole context at the cache-write price. That happens in two ways, and this hook
+re-writes the context at the cache-write price, all of it past any start (Claude Code's system
+prompt and tools) that other agents happen to keep cached. That happens in two ways, and this hook
 handles both from the transcripts, so nobody has to guess how long anything will take:
 
   Bash         A subagent on a 5-minute cache may not block for longer than 240 seconds in one
@@ -128,9 +129,9 @@ def check_bash(data):
     facts = read_agent(path) if path else {"ttl": 300, "context": 0}
     if facts["ttl"] >= 3600:
         return  # Bash's own limit (10 minutes) keeps an hour-long cache warm
-    size = f" (about {round(facts['context'] / 1000)}k tokens)" if facts["context"] else ""
+    size = f" (up to about {round(facts['context'] / 1000)}k tokens)" if facts["context"] else ""
     deny(f"Your cache lasts 5 minutes, so a call that blocks for longer than {MAX_BLOCK_5M} "
-         f"seconds makes your next request re-write your whole context{size}. Start the command "
+         f"seconds makes your next request re-write your context{size}. Start the command "
          "detached, with its output and exit status going to files, for example "
          "`nohup sh -c 'CMD; echo $? > DIR/status' > DIR/out 2>&1 &`, then check on it in calls "
          f"of {MAX_BLOCK_5M} seconds or less, such as "
@@ -177,7 +178,7 @@ def check_send(data):
     if cold:
         why = (f"{to} ({kind}) last made a request {ago(idle)} and its cache lasts "
                f"{lifetime(facts['ttl'])}, so it has gone cold: this message would make it re-write "
-               f"its whole context, about {k}k tokens, at the cache-write price.")
+               f"its context, up to about {k}k tokens, at the cache-write price.")
     else:
         why = (f"{to} ({kind}) is still warm, but its context is about {k}k tokens, past "
                f"{BIG_CONTEXT // 1000}k, where a continue suits only a short follow-up.")

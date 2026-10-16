@@ -142,7 +142,11 @@ The question: how does an orchestrator know whether a subagent will run long or 
 - **The orchestrator hears about it twice.** When the agent stops with its waiter live, the orchestrator gets a notice that it "is waiting on its own background work" and will report when that finishes; then the real report arrives. So each waiting employee wakes the orchestrator once in between, which costs one short turn.
 - **On a 5m cache the wake re-writes the context.** Test A's wake request, 6.6 minutes after its last one, wrote all 29,896 tokens and read none. That's the cost an employee's 1h cache saves.
 - **`claude -p` doesn't wait for it.** `-p` exits when the main turn ends, which ends its background agents. In one run it killed the waiter. In another, the waiter ended but the wake notice reached the agent 71 seconds late, after the main session's blocking Bash call returned. The session then ended its turn and exited before the agent ran. So waiting employees need a session that stays open: interactive, or a background job.
-- **1h wake, end to end:** being tested with `employee-sonnet` in an interactive session; the result goes here.
+- **1h wake, end to end, with `employee-sonnet`** in an interactive Sonnet session, briefed only to treat a 7-minute job as too long for one call. The agent followed its file's recipe unprompted. It started the job detached, started `timeout 3000 sh -c 'until [ -e DIR/status ]; do sleep 30; done'` in the background, ended its turn with one line, and wrote its cache at 1h (24,382 tokens). The waiter ended at 15:28:21. Its wake request went out 3 seconds later, after 7 minutes idle, and read 25,645 tokens while writing 454. On 5m it would have re-written them all, as test A did.
+- **The hook, live in the same session:**
+  - A `contractor-sonnet` asked to run Bash with a 600000 ms timeout was denied, and it got the detach recipe word for word.
+  - A SendMessage to it by name (`ctest`, which Claude Code keeps in the agent's `.meta.json`) 7 minutes after its last request was held, with the facts. Sending again went through, and it answered.
+  - That cold continue read 15,934 tokens and wrote 9,612: the start of the context (Claude Code's system prompt and tools) was still cached, apparently by other agents. So a cold continue re-writes *up to* the whole context, and the hook's messages say "up to".
 
 ## Orchestrator lifetime (v1, completed 2026-10-15)
 
