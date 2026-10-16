@@ -33,7 +33,7 @@ Spawn it by name from a session in its project. The brief carries:
 1. The task and the acceptance check.
 2. The thread name. New thread: say so. Existing thread: the instance reads its note.
 3. The branch to commit on, if the work changes code.
-4. Whether it may spawn contractors.
+4. Whether it may spawn gatherers (yes unless you say no) or other contractors (no unless you say yes). A gatherer is a `contractor-haiku` or `contractor-sonnet` that only reads and reports.
 5. The thread's standing directives, verbatim, if there are any.
 
 The instance reads its own kit; don't paste kit content into the brief.

@@ -1,6 +1,6 @@
 ---
 name: contractors
-description: "Rules for picking, briefing and continuing contractor subagents (contractor-sonnet, contractor-opus, contractor-fable) and general employees (employee-sonnet, employee-opus, employee-fable): contractor or employee, which type and effort, what the brief carries, and when to continue one or start fresh. Load before spawning either or sending one a follow-up."
+description: "Rules for picking, briefing and continuing contractor subagents (contractor-haiku, contractor-sonnet, contractor-opus, contractor-fable) and general employees (employee-sonnet, employee-opus, employee-fable): contractor or employee, which type and effort, what the brief carries, and when to continue one or start fresh. Load before spawning either or sending one a follow-up."
 ---
 
 # Contractors
@@ -33,13 +33,17 @@ The type sets the model and the cache. Pass `effort` on every spawn: it override
 
 | Type | Model | Spawns agents | Default effort |
 |---|---|---|---|
+| `contractor-haiku` | Haiku | never | low |
 | `contractor-sonnet` | Sonnet | never | medium |
-| `contractor-opus` | Opus | only if the brief allows | medium |
-| `contractor-fable` | Fable | only if the brief allows | high |
+| `contractor-opus` | Opus | gatherers, unless the brief forbids; others only if it allows | medium |
+| `contractor-fable` | Fable | gatherers, unless the brief forbids; others only if it allows | high |
 | `employee-sonnet`, `employee-opus`, `employee-fable` | as named | as for the contractor on that model | as for the contractor on that model |
+
+A gatherer is a `contractor-haiku` or `contractor-sonnet` that only reads and reports. Opus and Fable spawn them to keep wide reading out of their own context, and keep each one's job to about 4 minutes so their own 5-minute cache stays warm while they wait.
 
 | Pick | For |
 |---|---|
+| Haiku, low | Only a tiny job with nothing to decide, on files you name: one exact edit ("set `effort: medium` in `claude/agents/contractor-fable.md`"), or a small read in a format you give ("a table of file name and effort for each file in `claude/agents/`"). Haiku costs a twentieth of Sonnet per token. If the job needs a search, a judgment call or a long read, use Sonnet. |
 | Sonnet, low | Mechanical work the brief fully specifies, with a checkable result: greps, inventories, format conversions, pattern edits with tests. |
 | Sonnet, medium | Reading that needs care: read across many files and report, extract or summarize, land a verified branch, implement an exact spec with tests. |
 | Sonnet, high | Careful reading or checking where a miss is costly but the design is settled: audits against a checklist, migrations to a precise spec, repairing test suites. |
@@ -50,7 +54,7 @@ The type sets the model and the cache. Pass `effort` on every spawn: it override
 | Opus, xhigh | Problems at the reasoning ceiling where a wrong answer is expensive: subtle correctness or concurrency bugs, proofs, or after high fell short. |
 | Fable, high | The hardest judgment or synthesis, after Opus at xhigh was wrong, or for a spec others build from. Fable costs 2.5 times Opus per token. When the work needs your own context, fork instead. |
 
-There's no Haiku type: Sonnet at low effort covers that work. The built-in Explore agent is still fine for a read-only search.
+There's no employee on Haiku: its jobs are too small to have pauses. The built-in Explore agent is still fine for a read-only search.
 
 ## The brief
 
@@ -61,7 +65,7 @@ A fresh contractor knows only its brief and the working directory's instruction 
 3. What you already know that it would otherwise rediscover. Give paths to read rather than pasting files.
 4. The acceptance check: what makes the result right, and the command that shows it.
 5. What to return, and how long. A long result goes in a file the report names.
-6. Whether it may commit, push, or spawn agents (Opus and Fable only).
+6. Whether it may commit or push, and for Opus and Fable, whether it may spawn gatherers (yes unless you say no) or other agents (no unless you say yes).
 7. The user's standing directives that apply, verbatim.
 
 ## Continuing or starting fresh

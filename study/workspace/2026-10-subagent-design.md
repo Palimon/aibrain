@@ -148,6 +148,12 @@ The question: how does an orchestrator know whether a subagent will run long or 
   - A SendMessage to it by the name it was spawned with (Claude Code keeps it in the agent's `.meta.json`) 7 minutes after its last request was held, with the facts. Sending again went through, and it answered.
   - That cold continue read 15,934 tokens and wrote 9,612: the start of the context (Claude Code's system prompt and tools) was still cached, apparently by other agents. So a cold continue re-writes *up to* the whole context, and the hook's messages say "up to".
 
+## Haiku contractor, gatherers and instruction-style definitions (2026-10-16)
+
+- **`contractor-haiku`** (Haiku, low, 5m, no Agent tool) is for tiny jobs with nothing to decide, on files the brief names: one exact edit, or a small read in a format the brief gives. It stops with BLOCKED rather than guess. Claude Haiku 5.5 costs $0.10/$0.50 per million tokens (prompts up to 100k), a twentieth of Sonnet 5.5, and takes effort from low to max with medium as its default; the file sets low. This replaces the earlier rule that Sonnet at low covers Haiku's work. There's no employee on Haiku, because its jobs are too small to have pauses.
+- **Gatherers.** Opus and Fable agents may spawn a `contractor-haiku` or `contractor-sonnet` that only reads and reports, unless the brief forbids it. Other spawns still need the brief's permission. The point is to keep wide reading out of the context that does the judgment, and out of Fable's price. A contractor waiting on a gatherer makes no requests, so the gatherer's job is kept to about 4 minutes to leave the caller's 5-minute cache warm.
+- **Descriptions are instructions for the orchestrator.** Each definition's `description` says when to use the agent and which neighbour to use instead, not what the model is. Each body is a set of rules under the same headings (The brief, Edits, Your context, Cache rules, Final message), so the agent and a person reading the file find the same rule in the same place.
+
 ## Orchestrator lifetime (v1, completed 2026-10-15)
 
 Orchestrator tuning v1 is a completed work unit (2026-10-15). It covers the main session's cache lifetime (1h, above), the soft cap at 150k at natural breaks, the 500k hard cap, the session-state hooks, the managed Opus-at-medium default, and the research below confirming 150k. Left for a later version: a keep-alive for waits over an hour, idle compaction in background sessions (untested), the caveman inflow trial, and the recall-by-length probe in "Open tests".
