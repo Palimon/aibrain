@@ -441,6 +441,11 @@ if ! printf '{"session_id":"bootstrap-check"}' |
   warn "Claude Code's session-state hook doesn't run here, so long sessions compact without its guard. Check: python3 -I $AIBRAIN/claude/hooks/session-state.py"
 fi
 [[ -n "$hook_check" && -d "$hook_check" ]] && rm -rf -- "$hook_check"
+# The agent-cache hook (claude/hooks/agent-cache.py, README "Subagents") allows any call it can't
+# judge, so a dry run only proves that it starts.
+if ! printf '{"tool_name":"Bash","tool_input":{}}' | python3 -I "$AIBRAIN/claude/hooks/agent-cache.py" >/dev/null; then
+  warn "Claude Code's agent-cache hook doesn't run here, so subagents can re-write their cache by accident. Check: python3 -I $AIBRAIN/claude/hooks/agent-cache.py"
+fi
 
 # --- ~/.bashrc loads the aiagent token in every shell. The block must sit above
 # .bashrc's interactive-shell check, because agents' shells are non-interactive.

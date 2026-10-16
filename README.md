@@ -8,7 +8,7 @@ What it gives you:
 - **Secrets through a 1Password service account** limited to one vault. Agents read keys with `op read` and never see more than that vault.
 - **Long Claude Code sessions that keep their memory.** Hooks compact a session only at a natural break and keep every prompt, reply and subagent report on disk (see [Long sessions](#long-sessions)).
 - **Opus at medium effort as the fixed default,** with per-task model picks that never stick (see [Model and effort](#model-and-effort)).
-- **Subagents in two kinds:** contractors for one task, one type per model with the effort set per spawn, and employees with a kit on disk; the research behind each choice is in `study/` (see [Subagents](#subagents)).
+- **Subagents in two kinds:** contractors that work until done, on a 5-minute cache, and employees for work with pauses, on a 1-hour cache, some with a kit on disk; one type per model, with the effort set per spawn; the research behind each choice is in `study/` (see [Subagents](#subagents)).
 - **Your computers joined up:** GitHub, SSH with one key, Tailscale, and an OS agent on a hotkey.
 - **A privacy guard** that keeps personal details out of this public repo (see [Privacy guard](#privacy-guard)).
 
@@ -107,9 +107,9 @@ To check by hand: `python3 -I privacy/scan.py tree` for the files, `python3 -I p
 | `bootstrap.sh` | The setup script | Nothing; run it |
 | `skills/` | Skills, one folder each | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.pi/agent/skills`, `~/.hermes/skills` (the folders Omarchy uses for its own skills) |
 | `claude/` | Claude Code's own config | `~/.claude/settings.json`, `~/.claude/keybindings.json` |
-| `claude/agents/` | Claude Code subagent definitions for every project: the contractors (see [Subagents](#subagents)) | `~/.claude/agents`, one link per file |
+| `claude/agents/` | Claude Code subagent definitions for every project: the contractors and the general employees (see [Subagents](#subagents)) | `~/.claude/agents`, one link per file |
 | `claude/managed-settings.json` | Claude Code's default model and effort, Opus at medium | Copied to `/etc/claude-code/managed-settings.json` |
-| `claude/hooks/` | Claude Code hooks: `session-state.py` (see [Long sessions](#long-sessions)) and `privacy-guard.py` (see [Privacy guard](#privacy-guard)) | Run from the repo by `claude/settings.json` |
+| `claude/hooks/` | Claude Code hooks: `session-state.py` (see [Long sessions](#long-sessions)), `agent-cache.py` (see [Subagents](#subagents)) and `privacy-guard.py` (see [Privacy guard](#privacy-guard)) | Run from the repo by `claude/settings.json` |
 | `bin/` | Helper scripts | `~/.local/bin` |
 | `privacy/`, `.githooks/`, `.github/workflows/` | The privacy guard | `.githooks/` through `core.hooksPath` |
 | `personal.example/` | The template for your personal layer | Copied once, when you have none |
@@ -146,8 +146,10 @@ To change the limits: the soft cap is `autoCompactWindow` and the idle threshold
 
 The research, the cost numbers and every decision so far are in `study/workspace/2026-10-subagent-design.md`. What's in place:
 
-- **Employees** are long-running experts for one project's domain. Each has a definition in that project's `.claude/agents/employee-<domain>.md`, with a one-hour cache, and a kit in `agents/employee-<domain>/`: its charter, curated facts, a log of every episode, and a note per open thread. An instance lasts one task; the kit is what carries over. `skills/employees/` tells a session when to use one and how to brief, continue or retire it. `employee-aibrain` in this repo is the example.
-- **Contractors** do one task or a short chain, with no kit and a 5-minute cache. There's one type per model, in `claude/agents/`: `contractor-sonnet` (can't spawn agents), `contractor-opus` and `contractor-fable`. The session passes the effort on each spawn, so three types do the work of the nine model-and-effort types this design started from. `skills/contractors/` tells a session which type and effort suit a task, what a brief carries, and when to continue a contractor or start a fresh one.
+- **Contractor or employee** is chosen by how the session will work with the agent, never by how long the work might take: agents estimate durations in human hours, often far off. A cache stays warm as long as an agent keeps making requests, so what matters is whether the agent will stop and be picked up again after a pause.
+- **Contractors** work until they're done and report, with no kit and a 5-minute cache. There's one type per model, in `claude/agents/`: `contractor-sonnet` (can't spawn agents), `contractor-opus` and `contractor-fable`. The session passes the effort on each spawn, so three types do the work of the nine model-and-effort types this design started from. `skills/contractors/` tells a session which to pick, which type and effort suit a task, what a brief carries, and when to continue an agent or start a fresh one.
+- **Employees** have a 1-hour cache, for work with pauses in it: a back-and-forth with the session, or a job they start and wait for. A waiting employee starts a background waiter and stops, and Claude Code wakes it when the job ends. The general ones are `employee-sonnet`, `employee-opus` and `employee-fable` in `claude/agents/`. A project can also have domain employees, with a definition in its `.claude/agents/employee-<domain>.md` and a kit in `agents/employee-<domain>/`: a charter, curated facts, a log of every episode, and a note per open thread. An instance lasts one task; the kit is what carries over. `skills/employees/` tells a session how to brief, continue or retire them. `employee-aibrain` in this repo is the example.
+- **`claude/hooks/agent-cache.py`** keeps either kind from re-writing its cache by accident. A subagent on a 5-minute cache can't block for more than 240 seconds in one call, so it runs a longer command detached and checks on it. A message that would continue an agent whose cache has gone cold, or whose context is past 150k tokens, is held once with the facts: how long it has been idle, its cache lifetime, its context size. Sending again goes through.
 
 ## What else the script sets up
 
@@ -195,7 +197,7 @@ If GitHub rejects the token, put a new GitHub token in the "GitHub Agent" item a
 
 ## Changing the setup
 
-Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, `tests/session-state-test.sh` tests the session-state hook, and `tests/privacy-test.sh` tests the privacy guard.
+Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, and `tests/privacy-test.sh` tests the privacy guard.
 
 ## Unsupported keyboard reports
 

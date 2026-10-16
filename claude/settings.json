@@ -28,6 +28,19 @@
           {
             "type": "command",
             "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/privacy-guard.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/agent-cache.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/agent-cache.py\""
           }
         ]
       }

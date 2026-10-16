@@ -1,11 +1,25 @@
 ---
 name: contractors
-description: "Rules for picking, briefing and continuing contractor subagents (contractor-sonnet, contractor-opus, contractor-fable): which type and effort, what the brief carries, and when to continue one or start fresh. Load before spawning a contractor or sending one a follow-up."
+description: "Rules for picking, briefing and continuing contractor subagents (contractor-sonnet, contractor-opus, contractor-fable) and general employees (employee-sonnet, employee-opus, employee-fable): contractor or employee, which type and effort, what the brief carries, and when to continue one or start fresh. Load before spawning either or sending one a follow-up."
 ---
 
 # Contractors
 
-A contractor is a subagent for one task or a short chain. It has no kit and no thread note, and its cache lasts 5 minutes. What it learned reaches you only through its final message. The other kind of subagent is an employee, a long-running expert for one project (the `employees` skill).
+A contractor is a subagent for one task, or a few steps you send it one at a time. It has no kit and no thread note, and its cache lasts 5 minutes. What it learned reaches you only through its final message. The other kind of subagent is an employee, with a 1-hour cache for work with pauses in it. Some employees also carry a kit for one project's domain (the `employees` skill).
+
+## Contractor or employee
+
+Choose by how you'll work with the agent, never by how long the work might take. Agents tend to estimate in human hours, so a guess of two days can mean twenty minutes. How you'll work with it is your own plan, which you know when you spawn it.
+
+- **Contractor (5-minute cache):** it works until it's done and reports, and you don't plan to come back to it. That includes watching a job by checking on it every few minutes: each check is a request, so the cache stays warm however long it runs.
+- **Employee (1-hour cache):** it stops and gets picked up again after a pause. Use one for a back-and-forth (it reports, you or the user think, you send the next step), or for a job it starts and waits for without checking on it. A continue after a pause of 5 to 55 minutes then costs a read of its context instead of a re-write: on Opus at 60k, about $0.01 instead of $0.30. The 1-hour cache makes every token it writes cost 60% more, which the first such pause pays back.
+
+The general employees, `employee-sonnet`, `employee-opus` and `employee-fable`, take the same picks and briefs as the contractors below. When the work is in a domain that has its own employee with a kit (`agents/employee-<domain>/`), use that one instead (the `employees` skill).
+
+A cache goes cold by accident in two ways, and a hook handles both (`claude/hooks/agent-cache.py`):
+
+- **One call blocks too long.** A subagent on a 5-minute cache can't set a Bash timeout over 240 seconds. It runs a longer command detached and checks on it.
+- **You continue an agent after a pause.** The hook holds the message once if the agent's cache has gone cold or its context is past 150k, and tells you how long it has been idle and how big it is. Send the message again to continue anyway.
 
 ## Do it yourself or spawn
 
@@ -15,13 +29,14 @@ A contractor is a subagent for one task or a short chain. It has no kit and no t
 
 ## Type and effort
 
-The type sets the model. Pass `effort` on every spawn: it overrides the type's default and stays in effect when you continue the agent.
+The type sets the model and the cache. Pass `effort` on every spawn: it overrides the type's default and stays in effect when you continue the agent.
 
 | Type | Model | Spawns agents | Default effort |
 |---|---|---|---|
 | `contractor-sonnet` | Sonnet | never | medium |
 | `contractor-opus` | Opus | only if the brief allows | medium |
 | `contractor-fable` | Fable | only if the brief allows | high |
+| `employee-sonnet`, `employee-opus`, `employee-fable` | as named | as for the contractor on that model | as for the contractor on that model |
 
 | Pick | For |
 |---|---|
@@ -54,10 +69,10 @@ A fresh contractor knows only its brief and the working directory's instruction 
 Start a fresh contractor by default. Continue one only when what you need lives in it: its checkout, uncommitted changes, a running process, or reading that would take long to repeat.
 
 - **Within 5 minutes** of its last request, a continue reads its context from the cache.
-- **Later**, a continue re-writes its whole context at the cache-write price (1.25 times input). A fresh contractor with one consolidated brief pays its startup instead and starts small. Prefer it unless the old context is small or the state lives in the agent.
+- **Later**, a continue re-writes its whole context at the cache-write price (1.25 times input). A fresh contractor with one consolidated brief pays its startup instead and starts small. Prefer it unless the old context is small or the state lives in the agent. You can't see how much time has passed, so the hook tells you: when it holds a message, decide from the facts it gives, then spawn fresh or send again.
 - **Don't ping a contractor to keep it warm.** Each ping is a turn for you as well, a read of your whole context, so pings pay only for gaps of a few minutes.
 - **Every continue** repeats the standing directives. Directives from the first brief get lost across repeated resumes.
-- A contractor that waits on a long job runs it detached and ends with WAITING, naming the result file. Check that file yourself, and continue the contractor or start a fresh one only when there's work for it.
+- A contractor that waits on a long job checks on it itself for up to about an hour, because a check costs only a read of its own context and wakes no one. Past that it ends with WAITING, naming the output and status files. Check those yourself, and continue the contractor or start a fresh one only when there's work for it.
 
 ## Checking a result
 

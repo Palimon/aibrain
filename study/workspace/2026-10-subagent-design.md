@@ -8,7 +8,7 @@ General goal: keep agents smart, not only cheap. A cache saving counts only when
 
 1. **Reduce agent count.** The nine contractor types exist because the Agent tool had no per-call effort on 2.1.284. One type per model (Sonnet with `omitClaudeMd` and no Agent tool, Opus, Fable) may be enough now. *Done 2026-10-16:* `contractor-sonnet` (no Agent tool), `contractor-opus` and `contractor-fable` in `claude/agents/`, linked into `~/.claude/agents/`, with `skills/contractors/` mapping the nine old model-and-effort slots onto them. `omitClaudeMd` was dropped: the global instructions file now carries the secret-handling rules and is about 1k tokens, so leaving it out would save about $0.0025 per Sonnet spawn. Tested on 2.1.300 from a fresh `claude -p` session, with the definitions symlinked into `~/.claude/agents/` (symlinks aren't documented, but they load): `contractor-sonnet` with `effort: low` ran claude-sonnet-5-5 at low and had no Agent tool; `contractor-opus` with `effort: high` ran claude-opus-5-5 at high, over its medium default; `contractor-fable` with no effort ran claude-fable-5-1 at its default high. Each wrote its startup at 5m only (11.1k, 12.2k and 12.6k tokens), none at 1h.
 2. **Possibly let effort be set per spawn.** The subagents docs say the Agent tool's `effort` parameter "overrides the `effort` field and stays in effect when the subagent is resumed." *Done 2026-10-16:* the contractors skill tells the session to pass `effort` on every spawn.
-3. **Check whether to keep 5-minute (contractor) agents alive with ~4.8-minute timers or drop and restart.** First-pass numbers are below. Pings are not free in quality either: each one adds a turn to the agent's context. Employees on the 1-hour cache don't need this.
+3. **Check whether to keep 5-minute (contractor) agents alive with ~4.8-minute timers or drop and restart.** First-pass numbers are below. Pings are not free in quality either: each one adds a turn to the agent's context. Employees on the 1-hour cache don't need this. *2026-10-16:* the contractors skill says not to ping; a contractor that waits checks on its job itself, and work with pauses goes to an employee.
 4. **Possibly lower the context threshold.** The SI continues a warm instance up to about 300k tokens. Matt Pocock's "smart zone" is about 100k (talk) to 150k (phase-boundaries doc). The SI's arithmetic prices dollars only, not the drop in quality at long context. *Decided 2026-10-15 for employees:* continue a warm instance under about 150k; past that only for a short follow-up. A cold instance always starts fresh. *Decided 2026-10-15 for main sessions (orchestrators):* soft cap 150k, compacting only at natural breaks, hard cap 500k; see "Orchestrator lifetime" below. Research the same day found no sign that orchestrators tolerate longer contexts than workers, so 150k stands for them too.
 5. **Set cache lifetime per agent type:** employees `1h`, contractors `5m`. Syntax and precedence below. *Done for employees 2026-10-15, for contractors 2026-10-16.*
 6. **Define employees.** None existed here yet; the SI's employees had kits of 12k-18k words each. *Done 2026-10-15:* `employee-aibrain`, defined in `.claude/agents/` with its kit in `agents/employee-aibrain/`, and the orchestrator rules in `skills/employees/`. Other projects define theirs the same way in their own repos. The kit loads through the definition body, because `memory:` does nothing with auto memory off.
@@ -116,7 +116,33 @@ Replay (`sims/ttl_sim.py`, `sims/orch_sim.py`) of a sample of real transcripts o
 
 A modelled 36-hour Fable xhigh orchestrator (250k average context, 90k tokens written per hour, waits of 5-30 minutes) gave the same order: 5m no keep-alive $392 total; 5m with ideal `max_tokens: 0` keep-alives $200 (Claude Code can't send these; Anthropic's caching guide recommends them for Fable); 5m with keep-alive turns about $225; 1h $210; 1h with a ~50-minute ping $210. Decision: orchestrators stay on 1h (the subscription default for main sessions).
 
-For subagents, the TTL should match how the agent waits: one that polls every 4 minutes keeps a 5m cache warm for free, so 1h is pure overhead; one that stops with WAITING and is continued later needs 1h. Employees: undecided, see "Open tests".
+For subagents, the TTL should match how the agent waits: one that polls every 4 minutes keeps a 5m cache warm for free, so 1h is pure overhead; one that stops with WAITING and is continued later needs 1h. *Decided 2026-10-16:* see "Contractor or employee: by how the session works with it".
+
+## Contractor or employee: by how the session works with it (2026-10-16)
+
+The question: how does an orchestrator know whether a subagent will run long or short? Agents estimate in human hours (a "48 hours" job done in 20 minutes), so an orchestrator choosing by an estimate would pick the longest-lived type every time.
+
+**Run length doesn't set the cache lifetime.** Every request reads the cache and restarts its clock, so an agent working nonstop keeps even a 5-minute cache warm for hours. A cache goes cold only when the agent's context sits idle past its lifetime and is then needed again: one call that blocks too long, or a continue after a pause. Both are facts at the moment they happen, so nothing needs a forecast.
+
+**Decision (the owner's proposal, refined): choose by interaction style,** which is the orchestrator's own plan when it spawns the agent.
+
+- **Contractor, 5m:** works until done and reports; or watches a job by checking every few minutes, since each check refreshes the cache.
+- **Employee, 1h:** stops and is picked up again after a pause: a back-and-forth through the user, or a job it starts and waits for without checking. A continue after 5-55 minutes then costs a read instead of a re-write. At 60k context: Opus $0.012 against $0.30, Sonnet $0.012 against $0.15, Fable $0.015 against $0.75. The 1h premium (0.75x input on every token written: $0.18, $0.09 and $0.45 at 60k) is paid back by the first such pause.
+- **General employees** `employee-sonnet`, `employee-opus` and `employee-fable` (1h, no kit, `background: true`, effort per spawn) were added so the rule applies to any work. The domain employees are employees that also carry a kit.
+
+**A hook replaces the model's sense of time:** `claude/hooks/agent-cache.py`, PreToolUse on Bash and SendMessage, tested by `tests/agent-cache-test.sh`.
+
+- **Bash:** a timeout over 240 seconds from a subagent whose transcript shows 5m cache writes is denied, with a detach-and-check recipe. A command that reaches its timeout moves to the background instead of being killed (tools-reference, "Timeout and output limits"), so the timeout bounds every blocking call. The hook doesn't rewrite the timeout with `updatedInput`, because a rewrite has to come with "allow", which skips the permission flow.
+- **SendMessage:** a message to a stopped subagent of this session whose cache is cold, or whose context is past 150k, is denied once with the facts; a second send within 10 minutes goes through. Cold means idle longer than the lifetime less 30 seconds, counted from when its last request was sent: the transcript entry before that request's first block. The lifetime comes from the transcript's own cache writes, so it is right even where Claude Code overrides the agent file. PreToolUse `additionalContext` arrives with the tool result, after the send, so a hold has to be a deny. Run on this session's transcripts, it would have held the continue I had just sent the claude-code-guide agent, which was at 191k.
+- The orchestrator can't see time passing between turns, which is why the continue rule ("within 5 minutes", "under about 55 minutes") needs the hook to supply the facts.
+
+**Waiting without checking, tested 2026-10-16 on 2.1.300:**
+
+- **A background subagent that ends its turn with a `run_in_background` waiter still running is woken when the waiter ends.** Test A, a general-purpose Sonnet agent in a background job: it started `sleep 400` detached at 15:07:22, started the waiter (`until [ -e DIR/status ]; do sleep 30; done`) and ended its turn. The waiter ended at 15:14:03; the agent's next request went out 2 seconds later, read the files and sent its report.
+- **The orchestrator hears about it twice.** When the agent stops with its waiter live, the orchestrator gets a notice that it "is waiting on its own background work" and will report when that finishes; then the real report arrives. So each waiting employee wakes the orchestrator once in between, which costs one short turn.
+- **On a 5m cache the wake re-writes the context.** Test A's wake request, 6.6 minutes after its last one, wrote all 29,896 tokens and read none. That's the cost an employee's 1h cache saves.
+- **`claude -p` doesn't wait for it.** `-p` exits when the main turn ends, which ends its background agents. In one run it killed the waiter. In another, the waiter ended but the wake notice reached the agent 71 seconds late, after the main session's blocking Bash call returned. The session then ended its turn and exited before the agent ran. So waiting employees need a session that stays open: interactive, or a background job.
+- **1h wake, end to end:** being tested with `employee-sonnet` in an interactive session; the result goes here.
 
 ## Orchestrator lifetime (v1, completed 2026-10-15)
 
@@ -160,7 +186,6 @@ Question: do orchestrators lose less to a growing context than coders and planne
 - Idle compaction in a background (unattended) session: the docs say it needs an interactive terminal session.
 - The `AskUserQuestion` answer format that `PostToolUse` receives (the hook falls back to raw JSON).
 - Orchestrator recall by length: plant decisions across many turns of a real orchestrator transcript, pad it to 150k, 250k and 400k, and ask Opus 5.5 questions that combine several of them. Only if 150k is questioned again.
-- Employees' TTL: 1h only pays if they wait by stopping (WAITING plus a continue), not by polling every 240 seconds.
 - The SI says subagents drop to 5 minutes on usage credits even with `subagentPromptCacheTtl`; current docs rank that setting above the credits rule. Re-probe if the global setting is ever used again.
 
 ## Sources
