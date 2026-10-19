@@ -9,8 +9,12 @@
 # (AIBRAIN_TEST_PERSONAL, default ~/Projects/aibrain-personal, its committed state) and the small repo
 # its config.sh names in TEST_REPO. Without those, full is skipped.
 #
-# Limits: Tailscale, pacman packages, sudoers, the SSH server and /etc/claude-code are system-wide, so
-# those steps see the real machine. The ubuntu scenarios run in an Ubuntu 24.04 container instead (Docker,
+# Limits: pacman packages, sudoers, the SSH server and /etc/claude-code are system-wide, so those steps
+# see the real machine. They write the same thing on every computer, the commit's own version of it, and
+# host_state checks that the host's copies don't change. Tailscale's settings differ from computer to
+# computer, and the homes run as computers other than the host, so the script leaves the host's Tailscale
+# alone (AIBRAIN_TEST_KEEP_TAILSCALE); host_state checks that too. A home's mise installs are the host's,
+# so a host scenario never runs as a Codex-only computer, whose run would uninstall the host's Claude Code. The ubuntu scenarios run in an Ubuntu 24.04 container instead (Docker,
 # through sudo when this user can't reach it), where every step runs for real except joining the tailnet.
 # There is no user systemd bus inside the test, so the Taildrop warning is expected.
 set -uo pipefail
@@ -19,6 +23,20 @@ REAL_MISE="${MISE_DATA_DIR:-$HOME/.local/share/mise}"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"   # this checkout, holding the commit under test
 REAL_PERSONAL="${AIBRAIN_TEST_PERSONAL:-$HOME/Projects/aibrain-personal}"
 FIXTURE="$ROOT/personal-fixture"
+host_state() { # what the host scenarios must leave as it was: the host's Tailscale and system-wide files
+  echo "tailscale prefs: $(tailscale debug prefs 2>/dev/null | jq -r '[.OperatorUser, .RouteAll, ((.AdvertiseRoutes // []) | join(","))] | map(tostring) | join("|")')"
+  echo "ip forwarding: $(sysctl -n net.ipv4.ip_forward)"
+  sha256sum /etc/sysctl.d/99-aibrain-tailscale.conf /etc/claude-code/managed-settings.json /etc/ssh/sshd_config.d/50-aibrain.conf 2>&1
+  echo "sudoers: $(sudo -n sha256sum /etc/sudoers.d/zz-aibrain 2>&1)"
+}
+host_check() { # host_check: fail loudly when the host differs from HOST_BEFORE
+  if diff <(printf '%s\n' "$HOST_BEFORE") <(host_state); then
+    echo "HOST_UNCHANGED: yes"
+  else
+    echo "HOST_UNCHANGED: NO. This scenario changed the host. Put the lines above marked < back by hand." >&2
+    echo "HOST_UNCHANGED: NO"; return 1
+  fi
+}
 trap 'rm -rf "$ROOT"' EXIT                   # the homes hold copies of the token
 mkdir -p "$ROOT"; git -C "$SRC" show HEAD:bootstrap.sh > "$ROOT/pasted.sh"
 
@@ -71,9 +89,10 @@ PERSONAL_REPO="$FIXTURE"   # the script's AIBRAIN_PERSONAL_REPO
 EXTRA_ENV=()   # more variables for the script, such as AIBRAIN_SETUP
 run() { # run <with-env-token 0|1> <script>; no tty, no DBus (gh can't reach the real keyring)
   local tok=(); [[ $1 == 1 ]] && tok=(OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_ACCOUNT_TOKEN")
+  [[ " ${EXTRA_ENV[*]} " != *ubuntu-box* ]] || { echo "ubuntu-box is Codex-only, so only the ubuntu scenarios run as it"; exit 1; }
   (cd "$H" && setsid -w env -i HOME="$H" USER="$USER" PATH=/usr/local/bin:/usr/bin TERM=dumb \
     XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" XDG_STATE_HOME="$H/.local/state" XDG_CACHE_HOME="$H/.cache" \
-    DBUS_SESSION_BUS_ADDRESS=disabled: AIBRAIN_REPO="$SRC" AIBRAIN_PERSONAL_REPO="$PERSONAL_REPO" "${tok[@]}" "${EXTRA_ENV[@]}" bash "$2" </dev/null 2>&1) | sed 's/\x1b\[[0-9;]*m//g'
+    DBUS_SESSION_BUS_ADDRESS=disabled: AIBRAIN_TEST_KEEP_TAILSCALE=1 AIBRAIN_REPO="$SRC" AIBRAIN_PERSONAL_REPO="$PERSONAL_REPO" "${tok[@]}" "${EXTRA_ENV[@]}" bash "$2" </dev/null 2>&1) | sed 's/\x1b\[[0-9;]*m//g'
   echo "[exit ${PIPESTATUS[0]}]"
 }
 snap() {
@@ -197,8 +216,16 @@ ucheck_twice() { # ucheck_twice <snap file prefix>: run the checkout's copy agai
   if diff "$1.snap1" "$1.snap2"; then echo "IDEMPOTENT: yes"; else echo "IDEMPOTENT: NO"; fi
 }
 
+if [[ "${1:-}" != ubuntu* && "${1:-}" != all ]]; then
+  HOST_BEFORE="$(host_state)"
+  trap 'host_check || rc=1; rm -rf "$ROOT"; exit "${rc:-0}"' EXIT
+fi
 if [[ "${1:-}" == all ]]; then
-  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers ubuntu ubuntu-claude; do echo "######## $s"; "$0" "$s"; done; exit
+  HOST_BEFORE="$(host_state)"; rc=0
+  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers ubuntu ubuntu-claude; do
+    echo "######## $s"; "$0" "$s" || rc=1
+  done
+  echo "######## all"; host_check || rc=1; exit "$rc"
 fi
 case "${1:-}" in
 fresh)

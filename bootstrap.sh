@@ -697,7 +697,11 @@ ts_fwd_ok() { # forwarding on for a subnet router, and no forwarding file of our
   fi
 }
 tsd_running() { systemctl is-enabled --quiet tailscaled.service && systemctl is-active --quiet tailscaled.service; }
-if pkg_missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
+# AIBRAIN_TEST_KEEP_TAILSCALE=1 leaves the system's Tailscale alone. The tests set it on their host, which
+# they run as another computer, so its settings would change the host's.
+if [[ "${AIBRAIN_TEST_KEEP_TAILSCALE:-}" == 1 ]]; then
+  :
+elif pkg_missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
   if ! have_tty && ! sudo -n true 2>/dev/null; then
     warn "Tailscale isn't fully set up, and that needs sudo. Run this once in a terminal."
   else
