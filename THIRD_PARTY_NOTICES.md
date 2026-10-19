@@ -4,7 +4,7 @@ These skills come from other projects, under the MIT License. Their notices are 
 
 ## skills/grilling, skills/grill-me, skills/grill-with-docs and skills/domain-modeling
 
-Copied unchanged from [mattpocock/skills](https://github.com/mattpocock/skills) (`skills/productivity/grilling` and `skills/productivity/grill-me` as of 2026-10-07, `skills/engineering/grill-with-docs` and `skills/engineering/domain-modeling` as of 2026-10-16). `grill-with-docs` runs `grilling` and `domain-modeling`, so the three go together.
+From [mattpocock/skills](https://github.com/mattpocock/skills) (`skills/productivity/grilling` and `skills/productivity/grill-me` as of 2026-10-07, `skills/engineering/grill-with-docs` and `skills/engineering/domain-modeling` as of 2026-10-16). Changed since: `grill-me` and `grill-with-docs` say how to load a skill in Codex as well as Claude Code, and `domain-modeling` writes "architecture decision record" in full and keeps the records in `docs/decisions/`, with its format file renamed to `DECISION-RECORD-FORMAT.md`. `grill-with-docs` runs `grilling` and `domain-modeling`, so the three go together.
 
 > Copyright (c) 2026 Matt Pocock
 
