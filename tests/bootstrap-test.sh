@@ -2,7 +2,7 @@
 # Runs bootstrap.sh in throwaway homes on tmpfs, so a change can be tested without touching the real
 # home. Each scenario runs the script twice and checks the second run changes nothing.
 # Needs OP_SERVICE_ACCOUNT_TOKEN set (every shell has it). Tests the last commit in this checkout.
-# Usage: tests/bootstrap-test.sh fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|ubuntu|ubuntu-claude|all
+# Usage: tests/bootstrap-test.sh fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all
 #
 # Each home gets a personal layer cloned from a fixture made from personal.example, except in
 # no-personal (none, so the script makes one) and full, which clones a copy of your own personal layer
@@ -107,6 +107,7 @@ snap() {
   done | sed "s#$H#~#g"
   local A="$H/Projects/aibrain" P="$H/Projects/aibrain-personal"
   echo "aibrain: $(git -C "$A" rev-parse --short HEAD 2>/dev/null) dirty=[$(git -C "$A" status --porcelain 2>/dev/null | tr '\n' ' ')] stashes=$(git -C "$A" stash list 2>/dev/null | wc -l)"
+  echo "excludes: $(cat "$A/.git/info/exclude" "$P/.git/info/exclude" 2>/dev/null | sha256sum | cut -c1-12)"
   echo "aibrain git: hooks=$(git -C "$A" config core.hooksPath) identity=$(git -C "$A" config user.name) <$(git -C "$A" config user.email)>"
   echo "aibrain-personal: $(git -C "$P" rev-parse --short HEAD 2>/dev/null || echo not-a-repo) dirty=[$(git -C "$P" status --porcelain 2>/dev/null | tr '\n' ' ')] files=[$(cd "$P" 2>/dev/null && find . -type f -not -path './.git/*' | sort | tr '\n' ' ')]"
   echo "os agent: $(sed "s#$H#~#" "$H/.config/aibrain/os-agent-dir" 2>/dev/null)"
@@ -253,7 +254,7 @@ if [[ "${1:-}" != ubuntu* && "${1:-}" != all ]]; then
 fi
 if [[ "${1:-}" == all ]]; then
   HOST_BEFORE="$(host_state)"; rc=0
-  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers ubuntu ubuntu-claude; do
+  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers worktrees ubuntu ubuntu-claude; do
     echo "######## $s"; "$0" "$s" || rc=1
   done
   echo "######## all"; host_check || rc=1; exit "$rc"
@@ -350,6 +351,28 @@ PY
   fi
   check_twice; show
   ;;
+worktrees)
+  # Claude Code's session worktrees under .claude/worktrees/ in either checkout are never local changes, so
+  # they're never stashed, also in a checkout from before the script excluded them.
+  mkhome worktrees; A="$H/Projects/aibrain" P="$H/Projects/aibrain-personal"
+  echo "--- run 1 (pasted, agent token)"; run 1 "$ROOT/pasted.sh" | grep -v '^==>'
+  for c in "$A" "$P"; do
+    sed -i '\#^/\.claude/worktrees/$#d' "$c/.git/info/exclude"
+    git -C "$c" worktree add -q -b session-test "$c/.claude/worktrees/session-test"
+    echo "a session's edit" >> "$c/.claude/worktrees/session-test/README.md"
+  done
+  echo "--- run 2 (checkout, with a session worktree in each checkout)"; run 0 "$A/bootstrap.sh" | grep -v '^==>' | tee "$H.run2"
+  check_twice | tee "$H.run3"; ok=1
+  for c in "$A" "$P"; do
+    if [[ -n "$(git -C "$c" status --porcelain)" || -n "$(git -C "$c" stash list)" ]] ||
+       [[ "$(grep -c '^/\.claude/worktrees/$' "$c/.git/info/exclude")" != 1 ]] ||
+       ! grep -qx "a session's edit" "$c/.claude/worktrees/session-test/README.md"; then
+      ok=0; echo "$c:"; git -C "$c" status --short; git -C "$c" stash list
+    fi
+  done
+  ! grep -qiE 'stashed|Ignoring path' "$H.run2" "$H.run3" || { ok=0; grep -hiE 'stashed|Ignoring path' "$H.run2" "$H.run3"; }
+  if ((ok)); then echo "WORKTREES_NOT_STASHED: yes"; else echo "WORKTREES_NOT_STASHED: NO"; fi
+  ;;
 computers)
   # Every computer has a folder in the personal layer, computers/<name>/. With no terminal and no name,
   # the computer is the hostname, unsaved, with a warning, and only the layer's setup.sh runs.
@@ -444,5 +467,5 @@ ubuntu-claude)
     echo "UBUNTU_TO_CODEX_ONLY: NO"; cat "$U.codex.snap2"
   fi
   ;;
-*) echo "Usage: $0 fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|ubuntu|ubuntu-claude|all" >&2; exit 2 ;;
+*) echo "Usage: $0 fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all" >&2; exit 2 ;;
 esac

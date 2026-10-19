@@ -189,7 +189,7 @@ The research, the cost numbers and every decision so far are in `study/workspace
 What it does with what's already there:
 
 - **Files it replaces** are copied to `~/.local/state/aibrain/` first.
-- **Edits to either repo that aren't committed** go into a git stash. Get them back with `git -C ~/Projects/aibrain stash pop` (or `aibrain-personal`).
+- **Edits to either repo that aren't committed** go into a git stash. Get them back with `git -C ~/Projects/aibrain stash pop` (or `aibrain-personal`). Claude Code's session worktrees in `.claude/worktrees/` aren't edits: the script lists that folder in each checkout's `.git/info/exclude`, so they're never stashed.
 - **Local commits** stay. The script rebases them onto the latest `main` and reminds you to push them.
 - **A folder that isn't a checkout of the right repo** at `~/Projects/aibrain` or `~/Projects/aibrain-personal` is moved to `~/.local/state/aibrain/` and cloned fresh.
 - **A token that doesn't work**, saved or pasted, gets asked for again.

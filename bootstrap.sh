@@ -280,6 +280,17 @@ fresh_clone() { # fresh_clone <dir> <repo>: clone <repo> into <dir>, saving what
   fi
   mkdir -p "$(dirname "$1")"
   git clone -q "$2" "$1"
+  exclude_worktrees "$1"
+}
+exclude_worktrees() { # exclude_worktrees <dir>: Claude Code's session worktrees in .claude/worktrees/ are never local changes
+  # It goes in the checkout's own .git/info/exclude, not a .gitignore, so it covers any repo the script
+  # keeps, the personal layer included, without a commit there.
+  local f; f="$(git -C "$1" rev-parse --git-path info/exclude)"
+  [[ "$f" == /* ]] || f="$1/$f"
+  grep -qxF '/.claude/worktrees/' "$f" 2>/dev/null && return
+  mkdir -p "$(dirname "$f")"
+  [[ ! -s "$f" || -z "$(tail -c 1 "$f")" ]] || echo >> "$f"
+  echo '/.claude/worktrees/' >> "$f"
 }
 reset_picks() { # put back the committed model and effort in claude/settings.json (README, "Model and effort")
   local g=(git -C "$AIBRAIN") rc
@@ -306,6 +317,7 @@ sync_checkout() { # sync_checkout <dir> <repo>: make <dir> a checkout of <repo>'
   # Model and effort picks that Claude Code's /model and /effort pickers saved into settings.json are
   # per-task choices, not setup changes: they're put back, so they're never stashed or committed.
   [[ "$dir" != "$AIBRAIN" ]] || reset_picks
+  exclude_worktrees "$dir"
   if [[ -n "$("${g[@]}" status --porcelain)" ]]; then
     "${g[@]}" stash push -q -u -m "aibrain bootstrap $(date -Is)"
     warn "Uncommitted changes in $name are stashed. Get them back with: git -C $name stash pop"
