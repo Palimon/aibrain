@@ -34,6 +34,12 @@ GIT_EMAIL=""
 # 1: Hyprland ignores unsupported key reports (README, "Unsupported keyboard reports").
 #HYPR_IGNORE_KEY_UNKNOWN=1
 
+# 1: this computer has no desktop, such as a server: no Hyprland keys, Taildrop, bar widget or web app.
+#HEADLESS=1
+
+# 1: Codex is this computer's only agent tool: no Claude Code (README, "Computers").
+#CODEX_ONLY=1
+
 # A small repo of GH_OWNER's that tests/bootstrap-test.sh full clones.
 #TEST_REPO=""
 

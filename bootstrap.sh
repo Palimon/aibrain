@@ -1,6 +1,7 @@
 #!/bin/bash
 # aibrain bootstrap: brings any Omarchy machine to the same AI agent setup,
-# whatever state it starts in. Re-running it changes nothing.
+# whatever state it starts in. Re-running it changes nothing. It also runs on Ubuntu (24.04 is tested),
+# for a computer without Omarchy, such as a headless server.
 #
 # Two repos make the setup. This one, at ~/Projects/aibrain, is public and holds nothing personal.
 # Your personal layer, at ~/Projects/aibrain-personal, holds config.sh (the values below), your
@@ -45,6 +46,8 @@ defaults() {
   TS_SHARE_LAN=""                 # the LAN this computer shares with the tailnet as a subnet router, e.g. 192.0.2.0/24
   OS_AGENT_DIRS=()                # the OS agent's folder: the first of these that exists, else ~/osagent
   HYPR_IGNORE_KEY_UNKNOWN=""      # 1: Hyprland ignores unsupported key reports (README, "Unsupported keyboard reports")
+  HEADLESS=""                     # 1: no desktop: no Hyprland keys, Taildrop, bar widget or web app (README, "Computers")
+  CODEX_ONLY=""                   # 1: Codex is the only agent tool: no Claude Code (README, "Computers")
 }
 load_config() { # the defaults, then config.sh, then this computer's config.sh
   defaults
@@ -103,6 +106,55 @@ link() { # link <target> <path>: make <path> a symlink to <target>, saving whate
   if [[ -e "$2" || -L "$2" ]]; then saved "$2"; fi
   ln -s "$1" "$2"
 }
+# --- Which system this is: Omarchy, or Ubuntu. Steps that differ ask DISTRO, or use pkg_missing and pkg_add.
+os_id="$( (. /etc/os-release && echo "$ID") 2>/dev/null || true)"
+case "$os_id" in
+  omarchy) DISTRO=omarchy ;;
+  ubuntu) DISTRO=ubuntu UBUNTU_CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")" ;;
+  *) die "This setup runs on Omarchy or Ubuntu, not \"${os_id:-an unknown system}\"." ;;
+esac
+pkg_missing() { # pkg_missing <package>: true when the package isn't installed
+  if [[ "$DISTRO" == omarchy ]]; then
+    omarchy-pkg-missing "$1"
+  else
+    [[ "$(dpkg-query -W -f '${db:Status-Status}' "$1" 2>/dev/null)" != installed ]]
+  fi
+}
+apt_source() { # apt_source <package>: on Ubuntu, the vendor's apt repo and signing key for a package Ubuntu doesn't carry
+  local arch key url keyring list line raw
+  arch="$(dpkg --print-architecture)"
+  case "$1" in
+    1password-cli) key=https://downloads.1password.com/linux/keys/1password.asc url="https://downloads.1password.com/linux/debian/$arch stable main" ;;
+    mise) key=https://mise.jdx.dev/gpg-key.pub url="https://mise.jdx.dev/deb stable main" ;;
+    tailscale) key="https://pkgs.tailscale.com/stable/ubuntu/$UBUNTU_CODENAME.noarmor.gpg" url="https://pkgs.tailscale.com/stable/ubuntu $UBUNTU_CODENAME main" ;;
+    *) return 0 ;;
+  esac
+  keyring="/etc/apt/keyrings/aibrain-$1.gpg" list="/etc/apt/sources.list.d/aibrain-$1.list"
+  line="deb [arch=$arch signed-by=$keyring] $url"
+  if [[ ! -s "$keyring" ]]; then
+    raw="$(mktemp)"
+    curl -fsSL "$key" -o "$raw" || die "Couldn't download the signing key for $1 from $key."
+    sudo install -d -m 0755 /etc/apt/keyrings
+    if grep -q -- '-----BEGIN PGP' "$raw"; then gpg --dearmor < "$raw" | sudo tee "$keyring" >/dev/null; else sudo tee "$keyring" < "$raw" >/dev/null; fi
+    sudo chmod 0644 "$keyring"; rm -f "$raw"
+  fi
+  [[ "$(cat "$list" 2>/dev/null)" == "$line" ]] || printf '%s\n' "$line" | sudo tee "$list" >/dev/null
+}
+pkg_add() { # pkg_add <package>...: install the packages that are missing, from the distro's repos or a vendor's
+  local p missing=()
+  for p in "$@"; do if pkg_missing "$p"; then missing+=("$p"); fi; done
+  ((${#missing[@]})) || return 0
+  say "Installing ${missing[*]}"
+  have_tty || sudo -n true 2>/dev/null || die "${missing[*]} isn't installed, and installing it needs sudo. Run this once in a terminal."
+  if [[ "$DISTRO" == omarchy ]]; then
+    omarchy-pkg-add "${missing[@]}"
+  else
+    for p in "${missing[@]}"; do apt_source "$p"; done
+    sudo apt-get update -qq
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
+  fi
+}
+desktop() { [[ "$DISTRO" == omarchy && "$HEADLESS" != 1 ]]; }   # Hyprland and Omarchy's desktop pieces are here
 prune() { # prune <dir> <prefix>...: remove broken symlinks in <dir> that point under one of the prefixes
   local dir="$1" l t p; shift
   for l in "$dir"/*; do
@@ -149,26 +201,20 @@ else
   setup=light
 fi
 
-# --- 1Password CLI, from Omarchy's package repo
-if omarchy-pkg-missing 1password-cli; then
-  say "Installing the 1Password CLI"
-  have_tty || sudo -n true 2>/dev/null || die "1password-cli is missing and installing it needs sudo. Run this once in a terminal."
-  omarchy-pkg-add 1password-cli
+# --- Packages: the 1Password CLI, and Python for the privacy guard and Claude Code's hooks. Omarchy has
+# them in its package repo. Ubuntu also needs what Omarchy comes with, mise among it, and 1Password's
+# and mise's own apt repos.
+if [[ "$DISTRO" == omarchy ]]; then
+  pkg_add 1password-cli python
+else
+  pkg_add ca-certificates curl gpg git jq python3
+  pkg_add 1password-cli mise
 fi
 
-# --- Python, for Claude Code's session-state hooks (claude/hooks/session-state.py)
-if omarchy-pkg-missing python; then
-  say "Installing Python"
-  have_tty || sudo -n true 2>/dev/null || die "python is missing and installing it needs sudo. Run this once in a terminal."
-  omarchy-pkg-add python
-fi
-
-# --- Claude Code and gh through mise, the same way Omarchy's launchers in ~/.local/bin do it
-say "Installing Claude Code and the GitHub CLI"
-MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet claude gh
-# Claude Code's first start migrates settings.json (it turns "opus" into "opus[1m]") and records that in
-# ~/.claude.json. Let that happen now, before settings.json links to the repo, so it stays as committed.
-claude auth status >/dev/null 2>&1 || true
+# --- gh through mise, the same way Omarchy's launchers in ~/.local/bin do it. Claude Code comes later,
+# once this computer's settings are known.
+say "Installing the GitHub CLI"
+MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet gh
 
 # --- aiagent service account token, for the $OP_VAULT vault
 token_ok() { [[ -n "$1" ]] && OP_SERVICE_ACCOUNT_TOKEN="$1" op vault list --format json 2>/dev/null | jq -e --arg v "$OP_VAULT" 'any(.[]; .name == $v)' >/dev/null; }
@@ -393,6 +439,26 @@ if [[ -n "$save_computer" && "$(cat "$COMPUTER_FILE" 2>/dev/null)" != "$COMPUTER
 fi
 load_config
 
+# --- Claude Code through mise, like gh, unless this computer is Codex-only (CODEX_ONLY). Then a Claude
+# Code from mise is removed, along with its managed settings below.
+if [[ "$CODEX_ONLY" != 1 ]]; then
+  say "Installing Claude Code"
+  MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet claude
+  # Claude Code's first start migrates settings.json (it turns "opus" into "opus[1m]") and records that in
+  # ~/.claude.json. Let that happen now, before settings.json links to the repo, so it stays as committed.
+  claude auth status >/dev/null 2>&1 || true
+elif mise ls --installed claude 2>/dev/null | grep -q .; then
+  say "Removing Claude Code, since this computer is Codex-only"
+  mise unuse -g --quiet claude 2>/dev/null || true   # its line in mise's config; this leaves the install
+  mise uninstall --quiet --all claude && mise reshim
+fi
+# Codex: Omarchy installs it the first time it's started. Elsewhere it comes through mise, once; a version
+# pinned later (mise use -g codex@<version>) is kept.
+if [[ "$DISTRO" != omarchy ]] && ! mise which codex >/dev/null 2>&1; then
+  say "Installing Codex"
+  MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet codex
+fi
+
 # --- Links from the agent tools into the repos. A skill, agent or script in the personal layer wins over
 # one here with the same name.
 say "Linking agent tools to ~/Projects/aibrain and ~/Projects/aibrain-personal"
@@ -422,7 +488,12 @@ prune "$HOME/.local/bin" "$AIBRAIN/bin" "$PERSONAL/bin" "$HOME/.claude/bin"
 # its /model and /effort pickers never write to and that outranks what they save. A pick still applies
 # to its own session (README, "Model and effort").
 MANAGED_SETTINGS=/etc/claude-code/managed-settings.json
-if ! cmp -s "$AIBRAIN/claude/managed-settings.json" "$MANAGED_SETTINGS"; then
+if [[ "$CODEX_ONLY" == 1 ]]; then
+  if [[ -e "$MANAGED_SETTINGS" ]]; then
+    have_tty || sudo -n true 2>/dev/null || die "Removing $MANAGED_SETTINGS needs sudo. Run this once in a terminal."
+    sudo rm -f "$MANAGED_SETTINGS"
+  fi
+elif ! cmp -s "$AIBRAIN/claude/managed-settings.json" "$MANAGED_SETTINGS"; then
   say "Setting Claude Code's default model and effort"
   have_tty || sudo -n true 2>/dev/null || die "Installing $MANAGED_SETTINGS needs sudo. Run this once in a terminal."
   sudo install -D -m 0644 "$AIBRAIN/claude/managed-settings.json" "$MANAGED_SETTINGS"
@@ -431,20 +502,22 @@ fi
 # --- Claude Code's session-state hooks (claude/hooks/session-state.py, wired in claude/settings.json;
 # see the README's "Long sessions"). Their folder holds prompt logs, so it's private to this user,
 # including files older versions wrote. Then a dry run proves the hook works on this machine.
-SESSION_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/aibrain/sessions"
-mkdir -p "$SESSION_STATE"
-chmod -R go-rwx "$SESSION_STATE"
-hook_check="$(mktemp -d)"
-if ! printf '{"session_id":"bootstrap-check"}' |
-     AIBRAIN_SESSION_STATE="$hook_check" python3 -I "$AIBRAIN/claude/hooks/session-state.py" Stop >/dev/null ||
-   [[ ! -e "$hook_check/bootstrap-check/idle" ]]; then
-  warn "Claude Code's session-state hook doesn't run here, so long sessions compact without its guard. Check: python3 -I $AIBRAIN/claude/hooks/session-state.py"
-fi
-[[ -n "$hook_check" && -d "$hook_check" ]] && rm -rf -- "$hook_check"
-# The agent-cache hook (claude/hooks/agent-cache.py, README "Subagents") allows any call it can't
-# judge, so a dry run only proves that it starts.
-if ! printf '{"tool_name":"Bash","tool_input":{}}' | python3 -I "$AIBRAIN/claude/hooks/agent-cache.py" >/dev/null; then
-  warn "Claude Code's agent-cache hook doesn't run here, so subagents can re-write their cache by accident. Check: python3 -I $AIBRAIN/claude/hooks/agent-cache.py"
+if [[ "$CODEX_ONLY" != 1 ]]; then
+  SESSION_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/aibrain/sessions"
+  mkdir -p "$SESSION_STATE"
+  chmod -R go-rwx "$SESSION_STATE"
+  hook_check="$(mktemp -d)"
+  if ! printf '{"session_id":"bootstrap-check"}' |
+       AIBRAIN_SESSION_STATE="$hook_check" python3 -I "$AIBRAIN/claude/hooks/session-state.py" Stop >/dev/null ||
+     [[ ! -e "$hook_check/bootstrap-check/idle" ]]; then
+    warn "Claude Code's session-state hook doesn't run here, so long sessions compact without its guard. Check: python3 -I $AIBRAIN/claude/hooks/session-state.py"
+  fi
+  [[ -n "$hook_check" && -d "$hook_check" ]] && rm -rf -- "$hook_check"
+  # The agent-cache hook (claude/hooks/agent-cache.py, README "Subagents") allows any call it can't
+  # judge, so a dry run only proves that it starts.
+  if ! printf '{"tool_name":"Bash","tool_input":{}}' | python3 -I "$AIBRAIN/claude/hooks/agent-cache.py" >/dev/null; then
+    warn "Claude Code's agent-cache hook doesn't run here, so subagents can re-write their cache by accident. Check: python3 -I $AIBRAIN/claude/hooks/agent-cache.py"
+  fi
 fi
 
 # --- ~/.bashrc loads the aiagent token in every shell. The block must sit above
@@ -453,7 +526,11 @@ say "Updating ~/.bashrc"
 touch "$HOME/.bashrc"
 block="# >>> aibrain >>>
 # 1Password service account for AI agents (vault: $OP_VAULT). Managed by ~/Projects/aibrain/bootstrap.sh."'
-[[ -r ~/.config/op/aiagent-token ]] && export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"
+[[ -r ~/.config/op/aiagent-token ]] && export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"'
+# Omarchy puts mise's tools and ~/.local/bin on the PATH itself; elsewhere the block does, for agents' shells too
+[[ "$DISTRO" == omarchy ]] || block+='
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"'
+block+='
 # <<< aibrain <<<'
 # Take out the block and the lines older bootstraps wrote, each with the blank line before it, then put the block back after env-bootstrap
 new="$(awk '
@@ -521,13 +598,17 @@ if [[ "$ssh_new" != "$(< "$HOME/.ssh/config")" ]]; then
   [[ ! -s "$HOME/.ssh/config" ]] || { mkdir -p "$BACKUP/.ssh" && cp "$HOME/.ssh/config" "$BACKUP/.ssh/config"; }
   printf '%s\n' "$ssh_new" > "$HOME/.ssh/config"
 fi
-# The SSH server takes key logins only. ufw blocks it from the LAN, and Tailscale lets it in from your tailnet.
+# The SSH server takes key logins only. On Omarchy ufw blocks it from the LAN, and Tailscale lets it in from your tailnet.
 SSHD_CONF=/etc/ssh/sshd_config.d/50-aibrain.conf
 sshd_conf='# Managed by ~/Projects/aibrain/bootstrap.sh: key logins only, no root.
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no'
-if [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]] || ! systemctl is-enabled --quiet sshd.service || ! systemctl is-active --quiet sshd.service; then
+# Ubuntu calls the server ssh.service, and may start it from ssh.socket, its default.
+if [[ "$DISTRO" == omarchy ]]; then SSH_UNITS=(sshd.service); else SSH_UNITS=(ssh.service ssh.socket); fi
+ssh_running() { local u; for u in "${SSH_UNITS[@]}"; do systemctl is-enabled --quiet "$u" && systemctl is-active --quiet "$u" && return 0; done; return 1; }
+if [[ "$DISTRO" == ubuntu ]] && pkg_missing openssh-server; then pkg_add openssh-server; fi
+if [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]] || ! ssh_running; then
   if ! have_tty && ! sudo -n true 2>/dev/null; then
     warn "The SSH server isn't set up, and that needs sudo. Run this once in a terminal."
   else
@@ -535,10 +616,11 @@ if [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]] || ! systemctl is-ena
     if [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]]; then
       printf '%s\n' "$sshd_conf" | sudo tee "$SSHD_CONF" >/dev/null
       sudo ssh-keygen -A >/dev/null   # host keys, which Arch otherwise makes only when sshd first starts
+      [[ "$DISTRO" != ubuntu ]] || sudo install -d -m 0755 /run/sshd   # sshd -t needs it; Ubuntu makes it only for a running server
       sudo sshd -t || die "sshd rejected its config. Check $SSHD_CONF."
-      ! systemctl is-active --quiet sshd.service || sudo systemctl reload sshd.service
+      ! systemctl is-active --quiet "${SSH_UNITS[0]}" || sudo systemctl reload "${SSH_UNITS[0]}"
     fi
-    sudo systemctl enable --now sshd.service
+    ssh_running || sudo systemctl enable --now "${SSH_UNITS[0]}"
   fi
 fi
 
@@ -557,28 +639,30 @@ This folder is the memory of the agent that looks after this computer: its setup
 A fix that must outlast a reinstall goes in the personal layer, in `computers/<name>/`, as aibrain's README describes under "Computers". `~/.config/aibrain/computer` holds this computer's name; without that file, the name is the hostname.
 EOF
 HYPR_BINDINGS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
-hypr_block='-- >>> aibrain >>>
+if desktop; then
+  hypr_block='-- >>> aibrain >>>
 -- Ctrl+Super+Shift+A: Claude Code in bypass mode in the OS agent folder. Managed by ~/Projects/aibrain/bootstrap.sh.
 hl.unbind("SUPER + SHIFT + CTRL + A")
 o.bind("SUPER + SHIFT + CTRL + A", "Agent", "aibrain-agent")'
-[[ "$HYPR_IGNORE_KEY_UNKNOWN" != 1 ]] || hypr_block+='
+  [[ "$HYPR_IGNORE_KEY_UNKNOWN" != 1 ]] || hypr_block+='
 -- KEY_UNKNOWN is evdev 240 / XKB 248. Consume unsupported reports before they
 -- enter the pressed-key list and become NUL input on focus changes.
 hl.bind("code:248", function() end, { locked = true, ignore_mods = true, dont_inhibit = true, submap_universal = true, description = "Ignore unsupported key reports" })'
-hypr_block+='
+  hypr_block+='
 -- <<< aibrain <<<'
-mkdir -p "$(dirname "$HYPR_BINDINGS")" && touch "$HYPR_BINDINGS"
-# Take out the block, with the blank line before it, then put it back at the end
-hypr_new="$(awk '
-  /^-- >>> aibrain >>>$/ { held = 0; skip = 1; next }
-  skip { if ($0 ~ /^-- <<< aibrain <<<$/) skip = 0; next }
-  /^$/ { if (held) print ""; held = 1; next }
-  { if (held) print ""; held = 0; print }
-' "$HYPR_BINDINGS")"
-hypr_new="${hypr_new:+$hypr_new$'\n\n'}$hypr_block"
-if [[ "$hypr_new" != "$(< "$HYPR_BINDINGS")" ]]; then
-  mkdir -p "$BACKUP/.config/hypr" && cp "$HYPR_BINDINGS" "$BACKUP/.config/hypr/bindings.lua"
-  printf '%s\n' "$hypr_new" > "$HYPR_BINDINGS"
+  mkdir -p "$(dirname "$HYPR_BINDINGS")" && touch "$HYPR_BINDINGS"
+  # Take out the block, with the blank line before it, then put it back at the end
+  hypr_new="$(awk '
+    /^-- >>> aibrain >>>$/ { held = 0; skip = 1; next }
+    skip { if ($0 ~ /^-- <<< aibrain <<<$/) skip = 0; next }
+    /^$/ { if (held) print ""; held = 1; next }
+    { if (held) print ""; held = 0; print }
+  ' "$HYPR_BINDINGS")"
+  hypr_new="${hypr_new:+$hypr_new$'\n\n'}$hypr_block"
+  if [[ "$hypr_new" != "$(< "$HYPR_BINDINGS")" ]]; then
+    mkdir -p "$BACKUP/.config/hypr" && cp "$HYPR_BINDINGS" "$BACKUP/.config/hypr/bindings.lua"
+    printf '%s\n' "$hypr_new" > "$HYPR_BINDINGS"
+  fi
 fi
 
 # --- Claude Code: user-scope MCP servers live in ~/.claude.json, which is not tracked. Add them here, e.g.:
@@ -594,7 +678,8 @@ fi
 # "Tailscale auth key" item in the vault when there is one, and otherwise with a browser login.
 # A computer with TS_SHARE_LAN set shares that LAN instead: it advertises the LAN, forwards IPv4 for
 # it, and doesn't accept routes, because it reaches that LAN directly. Its route needs approving once
-# in the admin console.
+# in the admin console. On Ubuntu the package comes from Tailscale's apt repo. Without a desktop, Taildrop
+# receiving, the bar widget and the web app are left out.
 TS_SYSCTL=/etc/sysctl.d/99-aibrain-tailscale.conf
 ts_up() { [[ "$(tailscale status --json 2>/dev/null | jq -r '.BackendState // empty')" == Running ]]; }
 ts_prefs() { tailscale debug prefs 2>/dev/null || true; }
@@ -612,12 +697,12 @@ ts_fwd_ok() { # forwarding on for a subnet router, and no forwarding file of our
   fi
 }
 tsd_running() { systemctl is-enabled --quiet tailscaled.service && systemctl is-active --quiet tailscaled.service; }
-if omarchy-pkg-missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
+if pkg_missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
   if ! have_tty && ! sudo -n true 2>/dev/null; then
     warn "Tailscale isn't fully set up, and that needs sudo. Run this once in a terminal."
   else
     say "Setting up Tailscale"
-    omarchy-pkg-add tailscale
+    pkg_add tailscale
     tsd_running || sudo systemctl enable --now tailscaled.service
     if ! ts_up; then
       # --reset so joining leaves exactly these settings, whatever an earlier setup left behind
@@ -652,7 +737,7 @@ if omarchy-pkg-missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok ||
     fi
   fi
 fi
-if omarchy-cmd-present tailscale; then
+if desktop && omarchy-cmd-present tailscale; then
   systemctl --user is-enabled --quiet omarchy-tailscale-receive.service 2>/dev/null ||
     systemctl --user enable --now omarchy-tailscale-receive.service || warn "Couldn't turn on Taildrop receiving (omarchy-tailscale-receive.service)."
   [[ "$(omarchy-plugin-list 2>/dev/null | awk '$1 == "omarchy.tailscale" { print $2 }')" == enabled ]] ||
@@ -663,7 +748,7 @@ if omarchy-cmd-present tailscale; then
 fi
 
 # --- Logins
-if ! claude auth status >/dev/null 2>&1; then
+if [[ "$CODEX_ONLY" != 1 ]] && ! claude auth status >/dev/null 2>&1; then
   if have_tty; then
     say "Logging in to Claude"
     claude auth login </dev/tty
@@ -678,7 +763,7 @@ fi
 CLAUDE_JSON="$HOME/.claude.json"
 trust_dirs=("$os_dir")
 for d in "$HOME"/Projects/*/; do [[ -e "$d.git" || "${d%/}" == "$PERSONAL" ]] && trust_dirs+=("${d%/}"); done
-if [[ -s "$CLAUDE_JSON" ]] &&
+if [[ "$CODEX_ONLY" != 1 && -s "$CLAUDE_JSON" ]] &&
    [[ -n "$(jq -r '.projects as $p | $ARGS.positional[] | select((($p // {})[.] // {}).hasTrustDialogAccepted != true)' --args "${trust_dirs[@]}" < "$CLAUDE_JSON")" ]]; then
   claude_json_tmp="$(mktemp "$CLAUDE_JSON.XXXXXX")"
   jq 'reduce $ARGS.positional[] as $d (.; .projects[$d].hasTrustDialogAccepted = true)' --args "${trust_dirs[@]}" < "$CLAUDE_JSON" > "$claude_json_tmp"

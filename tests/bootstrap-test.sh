@@ -2,7 +2,7 @@
 # Runs bootstrap.sh in throwaway homes on tmpfs, so a change can be tested without touching the real
 # home. Each scenario runs the script twice and checks the second run changes nothing.
 # Needs OP_SERVICE_ACCOUNT_TOKEN set (every shell has it). Tests the last commit in this checkout.
-# Usage: tests/bootstrap-test.sh fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|all
+# Usage: tests/bootstrap-test.sh fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|ubuntu|ubuntu-claude|all
 #
 # Each home gets a personal layer cloned from a fixture made from personal.example, except in
 # no-personal (none, so the script makes one) and full, which clones a copy of your own personal layer
@@ -10,7 +10,8 @@
 # its config.sh names in TEST_REPO. Without those, full is skipped.
 #
 # Limits: Tailscale, pacman packages, sudoers, the SSH server and /etc/claude-code are system-wide, so
-# those steps see the real machine.
+# those steps see the real machine. The ubuntu scenarios run in an Ubuntu 24.04 container instead (Docker,
+# through sudo when this user can't reach it), where every step runs for real except joining the tailnet.
 # There is no user systemd bus inside the test, so the Taildrop warning is expected.
 set -uo pipefail
 ROOT="$XDG_RUNTIME_DIR/aibrain-test"
@@ -27,9 +28,11 @@ mkfixture() { # a personal layer repo: personal.example as committed, with test 
   git -C "$SRC" archive HEAD personal.example | tar -x -C "$FIXTURE" --strip-components=1
   printf '%s\n' 'GIT_NAME="Test User"' 'GIT_EMAIL="test@example.com"' >> "$FIXTURE/config.sh"
   printf '%s\n' 'mkdir -p "$HOME/setup-ran" && touch "$HOME/setup-ran/every-computer"' > "$FIXTURE/setup.sh"
-  mkdir -p "$FIXTURE/computers/test-box"
+  mkdir -p "$FIXTURE/computers/test-box" "$FIXTURE/computers/ubuntu-box" "$FIXTURE/computers/ubuntu-claude-box"
   printf '%s\n' '# test-box: a test computer, added 2026-01-01' 'HYPR_IGNORE_KEY_UNKNOWN=1' > "$FIXTURE/computers/test-box/config.sh"
   printf '%s\n' 'mkdir -p "$HOME/setup-ran" && printf "%s %s\n" "$COMPUTER" "$PERSONAL" > "$HOME/setup-ran/test-box"' > "$FIXTURE/computers/test-box/setup.sh"
+  printf '%s\n' '# ubuntu-box: a headless Codex-only server, added 2026-01-01' 'HEADLESS=1' 'CODEX_ONLY=1' > "$FIXTURE/computers/ubuntu-box/config.sh"
+  printf '%s\n' '# ubuntu-claude-box: a computer with every default, added 2026-01-01' > "$FIXTURE/computers/ubuntu-claude-box/config.sh"
   printf '%s\n' 're:\bxyzzy-fixture-term\b' >> "$FIXTURE/privacy/denylist"
   mkdir -p "$FIXTURE/skills/fixture-skill"
   printf '%s\n' '---' 'name: fixture-skill' 'description: A personal skill.' '---' > "$FIXTURE/skills/fixture-skill/SKILL.md"
@@ -131,8 +134,71 @@ check_twice() {
 }
 show() { echo "--- end state"; cat "$H.snap2"; echo "--- backups"; (cd "$H/.local/state/aibrain" 2>/dev/null && find . -maxdepth 3 | sort | head -30); }
 
+# --- Ubuntu: the script runs in an Ubuntu container with systemd, as a user with passwordless sudo, so its
+# packages, apt repos, SSH server and services are the container's own. The engine is a bare copy of this
+# checkout with HEAD as main. tailscale is a stub that reports a joined tailnet, so the container never
+# joins yours; the real package and tailscaled are still installed and started.
+UBUNTU_DOCKERFILE='FROM ubuntu:24.04
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv dbus sudo && rm -rf /var/lib/apt/lists/*
+RUN (userdel -r ubuntu || true) && useradd -m -u 1000 -s /bin/bash user && echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/00-test && chmod 440 /etc/sudoers.d/00-test
+RUN printf "%s\n" "#!/bin/sh" "case \"\$1\" in" \
+  "  status) echo \"{\\\"BackendState\\\":\\\"Running\\\"}\" ;;" \
+  "  debug) echo \"{\\\"OperatorUser\\\":\\\"user\\\",\\\"RouteAll\\\":true,\\\"AdvertiseRoutes\\\":null}\" ;;" \
+  "  *) echo \"tailscale test stub: \$*\" >&2; exit 1 ;;" "esac" > /usr/local/bin/tailscale && chmod 755 /usr/local/bin/tailscale
+CMD ["/sbin/init"]'
+DOCKER=(docker); docker info >/dev/null 2>&1 || DOCKER=(sudo -n --preserve-env=OP_SERVICE_ACCOUNT_TOKEN docker)
+CT=""
+ubuntu_start() { # ubuntu_start <name>: a fresh container, $CT, with the engine and personal layer under /fixtures
+  local image="aibrain-test-ubuntu:$(printf '%s' "$UBUNTU_DOCKERFILE" | sha256sum | cut -c1-12)"
+  if ! "${DOCKER[@]}" image inspect "$image" >/dev/null 2>&1; then
+    printf '%s\n' "$UBUNTU_DOCKERFILE" | "${DOCKER[@]}" build -q -t "$image" - >/dev/null || { echo "UBUNTU: couldn't build $image"; exit 1; }
+  fi
+  rm -rf "$ROOT/engine.git"; git clone -q --bare "$SRC" "$ROOT/engine.git"
+  git -C "$ROOT/engine.git" update-ref refs/heads/main "$(git -C "$SRC" rev-parse HEAD)"
+  git -C "$ROOT/engine.git" symbolic-ref HEAD refs/heads/main
+  CT="aibrain-test-$1-$$"; trap '"${DOCKER[@]}" rm -f "$CT" >/dev/null 2>&1; rm -rf "$ROOT"' EXIT
+  "${DOCKER[@]}" run -d --name "$CT" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock \
+    -v "$ROOT:/fixtures" "$image" >/dev/null || { echo "UBUNTU: couldn't start the container"; exit 1; }
+  for _ in $(seq 60); do
+    [[ "$("${DOCKER[@]}" exec "$CT" systemctl is-system-running 2>/dev/null)" =~ ^(running|degraded)$ ]] && return 0
+    sleep 1
+  done
+  echo "UBUNTU: systemd didn't start in the container"; exit 1
+}
+urun() { # urun <with-env-token 0|1> <script> [VAR=value...]: run the script in the container as user, no tty
+  local tok=() s="$2"; [[ $1 == 1 ]] && tok=(-e OP_SERVICE_ACCOUNT_TOKEN); shift 2
+  local e=(); for v in "$@"; do e+=(-e "$v"); done
+  "${DOCKER[@]}" exec -u user -w /home/user -e HOME=/home/user -e USER=user -e PATH=/usr/local/bin:/usr/bin:/bin \
+    -e TERM=dumb -e AIBRAIN_REPO=/fixtures/engine.git -e AIBRAIN_PERSONAL_REPO=/fixtures/personal-fixture "${tok[@]}" "${e[@]}" \
+    "$CT" setsid -w bash "$s" </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+  echo "[exit ${PIPESTATUS[0]}]"
+}
+usnap() { # the container's state: the user's files and links, and the system's packages, apt repos and services
+  "${DOCKER[@]}" exec -u user -w /home/user -e HOME=/home/user "$CT" bash -c '
+    cd ~ && sha256sum .bashrc .gitconfig .config/gh/hosts.yml .config/mise/config.toml .ssh/config .ssh/aibrain_fleet .ssh/authorized_keys 2>/dev/null
+    stat -c "%a %n" .config/op .config/op/aiagent-token .ssh .ssh/aibrain_fleet 2>/dev/null
+    echo "computer: $(cat .config/aibrain/computer 2>/dev/null || echo unsaved)"
+    echo "hypr bindings: $(test -e .config/hypr/bindings.lua && echo present || echo none)"
+    for d in .claude .claude/skills .claude/agents .agents/skills .codex .codex/skills .local/bin; do
+      find "$d" -mindepth 1 -maxdepth 1 -type l -printf "$d/%f -> %l\n" 2>/dev/null | sort
+    done
+    echo "aibrain: $(git -C Projects/aibrain rev-parse --short HEAD) dirty=[$(git -C Projects/aibrain status --porcelain | tr "\n" " ")]"
+    echo "aibrain-personal: $(git -C Projects/aibrain-personal rev-parse --short HEAD) dirty=[$(git -C Projects/aibrain-personal status --porcelain | tr "\n" " ")]"
+    echo "mise tools: $(mise ls -g --current 2>/dev/null | awk "{print \$1}" | sort | tr "\n" " ")"
+    echo "commands: $(. ~/.bashrc; for c in op gh codex claude mise python3 jq; do command -v $c >/dev/null && printf "%s " $c; done)"
+    dpkg-query -W -f "\${Package} \${db:Status-Status}\n" ca-certificates curl gpg git jq python3 1password-cli mise tailscale openssh-server 2>&1
+    sudo sha256sum /etc/sudoers.d/zz-aibrain /etc/ssh/sshd_config.d/50-aibrain.conf /etc/apt/sources.list.d/aibrain-* /etc/apt/keyrings/aibrain-* 2>&1
+    echo "managed settings: $(test -e /etc/claude-code/managed-settings.json && echo present || echo none)"
+    for u in ssh.service ssh.socket tailscaled.service; do echo "$u: $(systemctl is-enabled $u 2>/dev/null) $(systemctl is-active $u 2>/dev/null)"; done
+    echo "session-state folder: $(stat -c %a .local/state/aibrain/sessions 2>/dev/null || echo missing)"'
+}
+ucheck_twice() { # ucheck_twice <snap file prefix>: run the checkout's copy again and compare
+  usnap > "$1.snap1"; echo "--- run 2 (checkout)"; urun 0 /home/user/Projects/aibrain/bootstrap.sh | grep -v '^==>'; usnap > "$1.snap2"
+  if diff "$1.snap1" "$1.snap2"; then echo "IDEMPOTENT: yes"; else echo "IDEMPOTENT: NO"; fi
+}
+
 if [[ "${1:-}" == all ]]; then
-  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers; do echo "######## $s"; "$0" "$s"; done; exit
+  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers ubuntu ubuntu-claude; do echo "######## $s"; "$0" "$s"; done; exit
 fi
 case "${1:-}" in
 fresh)
@@ -262,5 +328,47 @@ computers)
   if ((ok)); then echo "COMPUTERS: yes"; else echo "COMPUTERS: NO"; fi
   show
   ;;
-*) echo "Usage: $0 fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|all" >&2; exit 2 ;;
+ubuntu)
+  # A fresh Ubuntu 24.04 server set up as a headless, Codex-only computer (HEADLESS=1, CODEX_ONLY=1)
+  ubuntu_start ubuntu; U="$ROOT/ubuntu"
+  echo "--- run 1 (pasted, agent token, AIBRAIN_COMPUTER=ubuntu-box)"; urun 1 /fixtures/pasted.sh AIBRAIN_COMPUTER=ubuntu-box | grep -v '^==>'
+  ucheck_twice "$U"; echo "--- end state"; cat "$U.snap2"
+  s="$(cat "$U.snap2")"
+  if [[ "$s" == *"computer: ubuntu-box"* && "$s" == *"commands: op gh codex mise python3 jq "* &&
+        "$s" != *"claude "* && "$s" == *"managed settings: none"* && "$s" == *"hypr bindings: none"* &&
+        "$s" == *"session-state folder: missing"* && "$s" == *"tailscaled.service: enabled active"* &&
+        "$s" =~ ssh\.(service|socket):\ enabled\ active && "$s" == *"1password-cli installed"* && "$s" == *"mise installed"* &&
+        "$s" == *".codex/AGENTS.md -> /home/user/Projects/aibrain-personal/AGENTS.md"* ]]; then
+    echo "UBUNTU_HEADLESS_CODEX: yes"
+  else
+    echo "UBUNTU_HEADLESS_CODEX: NO"
+  fi
+  if "${DOCKER[@]}" exec -u user "$CT" bash -c 'cd /home/user/Projects/aibrain && env -i HOME=/home/user PATH=/usr/bin python3 -I privacy/scan.py tree HEAD' >/dev/null; then
+    echo "PRIVACY_SCAN: yes"
+  else
+    echo "PRIVACY_SCAN: NO"
+  fi
+  ;;
+ubuntu-claude)
+  # Ubuntu 24.04 with every default: Claude Code and its managed settings. Then the same computer turns
+  # Codex-only, which removes Claude Code, and a further run changes nothing.
+  ubuntu_start ubuntu-claude; U="$ROOT/ubuntu-claude"
+  echo "--- run 1 (pasted, agent token, AIBRAIN_COMPUTER=ubuntu-claude-box)"; urun 1 /fixtures/pasted.sh AIBRAIN_COMPUTER=ubuntu-claude-box | grep -v '^==>'
+  ucheck_twice "$U"; s="$(cat "$U.snap2")"
+  if [[ "$s" == *"commands: op gh codex claude mise"* && "$s" == *"managed settings: present"* &&
+        "$s" == *"session-state folder: 700"* && "$s" == *"hypr bindings: none"* ]]; then
+    echo "UBUNTU_CLAUDE: yes"
+  else
+    echo "UBUNTU_CLAUDE: NO"; cat "$U.snap2"
+  fi
+  echo "--- run 3 (checkout, AIBRAIN_COMPUTER=ubuntu-box: Codex-only now)"
+  urun 0 /home/user/Projects/aibrain/bootstrap.sh AIBRAIN_COMPUTER=ubuntu-box | grep -v '^==>'
+  ucheck_twice "$U.codex"; s="$(cat "$U.codex.snap2")"
+  if [[ "$s" == *"commands: op gh codex mise"* && "$s" != *"claude "* && "$s" == *"managed settings: none"* ]]; then
+    echo "UBUNTU_TO_CODEX_ONLY: yes"
+  else
+    echo "UBUNTU_TO_CODEX_ONLY: NO"; cat "$U.codex.snap2"
+  fi
+  ;;
+*) echo "Usage: $0 fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|ubuntu|ubuntu-claude|all" >&2; exit 2 ;;
 esac

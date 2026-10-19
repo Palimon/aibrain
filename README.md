@@ -1,6 +1,6 @@
 # aibrain
 
-A setup for AI agent tools on [Omarchy](https://omarchy.org), the same on every computer you own. It isn't tied to one tool: today it configures Claude Code, Codex and Grok, and adding another tool means adding a few links. One script, `bootstrap.sh`, brings a computer from any state to the full setup, and running it again changes nothing.
+A setup for AI agent tools on [Omarchy](https://omarchy.org), the same on every computer you own, and on Ubuntu for a computer without Omarchy, such as a headless server. It isn't tied to one tool: today it configures Claude Code, Codex and Grok, and adding another tool means adding a few links. One script, `bootstrap.sh`, brings a computer from any state to the full setup, and running it again changes nothing.
 
 What it gives you:
 
@@ -23,7 +23,7 @@ What it gives you:
 
 ## Set up a computer
 
-This works on any Omarchy computer, freshly installed or already in use. Running it again later is safe. It brings the computer up to date and changes nothing that's already right.
+This works on any Omarchy computer, freshly installed or already in use, and on Ubuntu (see [On Ubuntu](#on-ubuntu)). Running it again later is safe. It brings the computer up to date and changes nothing that's already right.
 
 ### Before the first computer
 
@@ -53,6 +53,17 @@ Answer what it asks. Depending on what the computer already has, that's some of:
 
 It ends with "aibrain setup complete." Open a new terminal and start your agent, for example `claude`, or press Ctrl+Super+Shift+A for the OS agent. Codex asks you to log in the first time you run `codex`.
 
+### On Ubuntu
+
+The same script runs on Ubuntu; 24.04 is the version the tests cover. The differences:
+
+- **Start it over SSH** or on the computer's console, since a server has no clipboard: `bash <(curl -fsSL <raw URL of bootstrap.sh>)`. The questions are the same.
+- **Packages come from apt.** Ubuntu's own repos supply the basics Omarchy ships with (curl, gpg, git, jq, Python), and the vendors' apt repos supply the 1Password CLI, mise and Tailscale. Codex comes through mise; Omarchy installs it itself.
+- **There's no desktop,** so the Omarchy pieces are left out: the Hyprland keys, Taildrop receiving, the bar widget and the web app. A `.bashrc` block puts mise's tools and `~/.local/bin` on the PATH, which Omarchy does by itself.
+- **The SSH server** is Ubuntu's `ssh.service`, or `ssh.socket` when that starts it, as on a fresh 24.04. Nothing sets up a firewall.
+
+For a server, give the computer `HEADLESS=1`, and `CODEX_ONLY=1` when Codex is its only agent tool (see "Computers").
+
 An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a terminal it can't ask for anything, so it needs `OP_SERVICE_ACCOUNT_TOKEN` set and the 1Password CLI already installed. It sets up light unless the computer has a saved choice or `AIBRAIN_SETUP` is set, and `AIBRAIN_COMPUTER=<name>` tells it which computer it's on.
 
 ## Your personal layer
@@ -76,13 +87,18 @@ The script finds the layer's repo in this order: `AIBRAIN_PERSONAL_REPO` when se
 
 Every computer has a folder in the personal layer, named after it, for what differs on that computer alone. The script adds the folder for a new computer, commits it and pushes it, so every run applies it again, and so does the first run after a reinstall:
 
-- `computers/<name>/config.sh` sets settings for that computer on top of `config.sh`. Its first line says what the computer is (hardware and the date it was added). Any setting can go there. These usually do: `TS_SHARE_LAN` on the computer that shares your LAN with the tailnet, `OS_AGENT_DIRS` on one that keeps the OS agent's memory on another disk, and `HYPR_IGNORE_KEY_UNKNOWN` on one whose keyboard needs it.
+- `computers/<name>/config.sh` sets settings for that computer on top of `config.sh`. Its first line says what the computer is (hardware and the date it was added). Any setting can go there. These usually do: `TS_SHARE_LAN` on the computer that shares your LAN with the tailnet, `OS_AGENT_DIRS` on one that keeps the OS agent's memory on another disk, `HYPR_IGNORE_KEY_UNKNOWN` on one whose keyboard needs it, and on a server, `HEADLESS` and `CODEX_ONLY` (below).
 - `computers/<name>/setup.sh` holds steps that no setting covers, such as a kernel module option or a package only that computer needs. The layer's own `setup.sh` does the same for every computer. Both run at the end of each `bootstrap.sh` run, with `AIBRAIN`, `PERSONAL`, `COMPUTER` and `BACKUP` set, so like the script, each step must change nothing on a second run. `personal.example/computers/README.md` has examples.
 
 The script saves the computer's name in `~/.config/aibrain/computer` and asks only when that file is missing, as on a fresh install:
 - **New or existing?** "Existing" is a computer set up again after a reinstall: pick it from the list of your computers, and it gets its settings back. "New" asks for a name (the hostname by default; lowercase letters, digits and dashes) and adds its folder. The computer's Tailscale name is a good choice.
 - `AIBRAIN_COMPUTER=<name>` answers without asking, with an existing name or a new one.
 - Without a terminal and without a name, the script uses the hostname, saves nothing, adds no folder, and warns, so a later run in a terminal still asks.
+
+Two settings shape a computer that isn't a desktop:
+
+- `HEADLESS=1`: the computer has no desktop. The script leaves out the Hyprland keys (the OS agent's hotkey and `HYPR_IGNORE_KEY_UNKNOWN`), Taildrop receiving, the bar widget and the Tailscale web app. On Ubuntu these are left out anyway, since they're Omarchy's; the setting records that the computer is a server.
+- `CODEX_ONLY=1`: Codex is the only agent tool. The script doesn't install Claude Code, its managed settings, its hook checks, its login or its folder trust, and removes a Claude Code that mise installed and the managed settings file. Off Omarchy, it installs Codex through mise once; a version pinned later with `mise use -g codex@<version>` stays. The links for every tool stay, so other tools keep the instructions and skills.
 
 When Tailscale isn't set up yet, the computer joins under its name. To get a reinstalled computer's old name back in Tailscale, remove the old machine in the admin console before that run.
 
@@ -154,9 +170,9 @@ The research, the cost numbers and every decision so far are in `study/workspace
 ## What else the script sets up
 
 - Passwordless sudo for your user, in `/etc/sudoers.d/zz-aibrain`.
-- The 1Password CLI, from Omarchy's package repo.
+- The 1Password CLI, from Omarchy's package repo, or on Ubuntu from 1Password's apt repo.
 - Python, which the Claude Code hooks run on, a private `~/.local/state/aibrain/sessions` folder for them, and a check that the session-state hook runs (see [Long sessions](#long-sessions)).
-- Claude Code and the GitHub CLI, through mise.
+- Claude Code and the GitHub CLI, through mise. A Codex-only computer gets no Claude Code, and off Omarchy it gets Codex through mise.
 - The aiagent token in `~/.config/op/aiagent-token`, and a block in `~/.bashrc` that loads it in every shell, including the agents' shells.
 - The GitHub CLI logged in with the token stored in the vault, and git using it for github.com.
 - git's name and email from `config.sh`, and in this repo the privacy hooks and the public identity.
@@ -165,7 +181,7 @@ The research, the cost numbers and every decision so far are in `study/workspace
 - An SSH server that takes key logins only. ufw keeps it closed to the LAN, and your other computers reach it over Tailscale.
 - The OS agent: Ctrl+Super+Shift+A opens Claude Code in bypass mode in the OS agent's folder: the first folder in `OS_AGENT_DIRS` that exists, otherwise `~/osagent`. The folder is the agent's memory for that computer, and a new one starts with a short `AGENTS.md`.
 - Claude Code's trust for the OS agent folder and every repo in `~/Projects`, so it doesn't ask before the first session in each.
-- Tailscale, set up the way Omarchy's own installer does it. The computer joins your tailnet with routes accepted, you can run `tailscale` without sudo, Taildrop files land in `~/Downloads`, the bar gets a Tailscale widget, and the launcher gets the admin console as a web app. A computer with `TS_SHARE_LAN` set, in its `computers/<name>/config.sh`, shares that LAN with the tailnet instead of accepting routes. When it's first set, approve the route in the admin console: Machines, then the computer, then Edit route settings.
+- Tailscale, set up the way Omarchy's own installer does it. The computer joins your tailnet with routes accepted, you can run `tailscale` without sudo, Taildrop files land in `~/Downloads`, the bar gets a Tailscale widget, and the launcher gets the admin console as a web app. A computer without a desktop gets the first two. On Ubuntu the package comes from Tailscale's apt repo. A computer with `TS_SHARE_LAN` set, in its `computers/<name>/config.sh`, shares that LAN with the tailnet instead of accepting routes. When it's first set, approve the route in the admin console: Machines, then the computer, then Edit route settings.
 - The Claude Code login.
 
 What it does with what's already there:

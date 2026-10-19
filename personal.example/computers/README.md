@@ -10,6 +10,8 @@ Settings for this computer, read after `../config.sh`, so a value here wins. `bo
 TS_SHARE_LAN="192.0.2.0/24"     # this computer shares its LAN with the tailnet
 OS_AGENT_DIRS=(/srv/osagent)    # the OS agent keeps its memory on another disk
 HYPR_IGNORE_KEY_UNKNOWN=1       # this computer's keyboard sends unsupported key reports
+HEADLESS=1                      # a server: no desktop
+CODEX_ONLY=1                    # Codex is the only agent tool: no Claude Code
 ```
 
 ## setup.sh
@@ -22,7 +24,7 @@ conf=/etc/modprobe.d/iwlwifi-power.conf
 line='options iwlwifi power_save=0'
 [[ "$(cat "$conf" 2>/dev/null)" == "$line" ]] || echo "$line" | sudo tee "$conf" >/dev/null
 
-# A package only this computer needs
+# A package only this computer needs (on Ubuntu: dpkg-query and apt-get)
 if omarchy-pkg-missing nvtop; then omarchy-pkg-add nvtop; fi
 ```
 
