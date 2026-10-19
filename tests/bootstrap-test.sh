@@ -49,7 +49,7 @@ mkfixture() { # a personal layer repo: personal.example as committed, with test 
   mkdir -p "$FIXTURE/computers/test-box" "$FIXTURE/computers/ubuntu-box" "$FIXTURE/computers/ubuntu-claude-box"
   printf '%s\n' '# test-box: a test computer, added 2026-01-01' 'HYPR_IGNORE_KEY_UNKNOWN=1' > "$FIXTURE/computers/test-box/config.sh"
   printf '%s\n' 'mkdir -p "$HOME/setup-ran" && printf "%s %s\n" "$COMPUTER" "$PERSONAL" > "$HOME/setup-ran/test-box"' > "$FIXTURE/computers/test-box/setup.sh"
-  printf '%s\n' '# ubuntu-box: a headless Codex-only server, added 2026-01-01' 'HEADLESS=1' 'CODEX_ONLY=1' > "$FIXTURE/computers/ubuntu-box/config.sh"
+  printf '%s\n' '# ubuntu-box: a headless Codex-only server, added 2026-01-01' 'HEADLESS=1' 'CODEX_ONLY=1' 'TS_ACCEPT_ROUTES=0' > "$FIXTURE/computers/ubuntu-box/config.sh"
   printf '%s\n' '# ubuntu-claude-box: a computer with every default, added 2026-01-01' > "$FIXTURE/computers/ubuntu-claude-box/config.sh"
   printf '%s\n' 're:\bxyzzy-fixture-term\b' >> "$FIXTURE/privacy/denylist"
   mkdir -p "$FIXTURE/skills/fixture-skill"
@@ -155,16 +155,42 @@ show() { echo "--- end state"; cat "$H.snap2"; echo "--- backups"; (cd "$H/.loca
 
 # --- Ubuntu: the script runs in an Ubuntu container with systemd, as a user with passwordless sudo, so its
 # packages, apt repos, SSH server and services are the container's own. The engine is a bare copy of this
-# checkout with HEAD as main. tailscale is a stub that reports a joined tailnet, so the container never
-# joins yours; the real package and tailscaled are still installed and started.
+# checkout with HEAD as main. tailscale is a stub, so the container never joins your tailnet; the real
+# package and tailscaled are still installed and started. The stub keeps its prefs in a state file, so up,
+# set and logout change them, and logs each of those calls. It starts joined, accepting routes, with no
+# operator, the way a join outside the script leaves Tailscale.
 UBUNTU_DOCKERFILE='FROM ubuntu:24.04
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv dbus sudo && rm -rf /var/lib/apt/lists/*
 RUN (userdel -r ubuntu || true) && useradd -m -u 1000 -s /bin/bash user && echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/00-test && chmod 440 /etc/sudoers.d/00-test
-RUN printf "%s\n" "#!/bin/sh" "case \"\$1\" in" \
-  "  status) echo \"{\\\"BackendState\\\":\\\"Running\\\"}\" ;;" \
-  "  debug) echo \"{\\\"OperatorUser\\\":\\\"user\\\",\\\"RouteAll\\\":true,\\\"AdvertiseRoutes\\\":null}\" ;;" \
-  "  *) echo \"tailscale test stub: \$*\" >&2; exit 1 ;;" "esac" > /usr/local/bin/tailscale && chmod 755 /usr/local/bin/tailscale
 CMD ["/sbin/init"]'
+TS_STUB='#!/bin/sh
+# tailscale test stub: prefs in a state file; up, set and logout change them and are logged
+d=/var/lib/tailscale-stub
+. "$d/state"
+cmd="$1"; shift
+case "$cmd" in
+  status) printf "{\"BackendState\":\"%s\"}\n" "$STATE" ;;
+  debug)
+    r=null; [ -z "$ROUTES" ] || r="[\"$(echo "$ROUTES" | sed "s/,/\",\"/g")\"]"
+    printf "{\"OperatorUser\":\"%s\",\"RouteAll\":%s,\"AdvertiseRoutes\":%s,\"Hostname\":\"%s\"}\n" "$OPERATOR" "$ROUTEALL" "$r" "$HOST" ;;
+  up|set|logout)
+    [ "$(id -u)" = 0 ] || { echo "tailscale test stub: $cmd needs root" >&2; exit 1; }
+    echo "$cmd $*" >> "$d/log"
+    for a; do
+      case "$a" in
+        --reset) OPERATOR= ROUTEALL=false ROUTES= HOST= ;;
+        --accept-routes) ROUTEALL=true ;;
+        --accept-routes=*) ROUTEALL="${a#*=}" ;;
+        --operator=*) OPERATOR="${a#*=}" ;;
+        --advertise-routes=*) ROUTES="${a#*=}" ;;
+        --hostname=*) HOST="${a#*=}" ;;
+        --auth-key=*) cat >/dev/null ;;
+      esac
+    done
+    case "$cmd" in up) STATE=Running ;; logout) STATE=NeedsLogin ;; esac
+    printf "STATE=%s\nOPERATOR=%s\nROUTEALL=%s\nROUTES=%s\nHOST=%s\n" "$STATE" "$OPERATOR" "$ROUTEALL" "$ROUTES" "$HOST" > "$d/state" ;;
+  *) echo "tailscale test stub: $cmd $*" >&2; exit 1 ;;
+esac'
 DOCKER=(docker); docker info >/dev/null 2>&1 || DOCKER=(sudo -n --preserve-env=OP_SERVICE_ACCOUNT_TOKEN docker)
 CT=""
 ubuntu_start() { # ubuntu_start <name>: a fresh container, $CT, with the engine and personal layer under /fixtures
@@ -178,6 +204,9 @@ ubuntu_start() { # ubuntu_start <name>: a fresh container, $CT, with the engine 
   CT="aibrain-test-$1-$$"; trap '"${DOCKER[@]}" rm -f "$CT" >/dev/null 2>&1; rm -rf "$ROOT"' EXIT
   "${DOCKER[@]}" run -d --name "$CT" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock \
     -v "$ROOT:/fixtures" "$image" >/dev/null || { echo "UBUNTU: couldn't start the container"; exit 1; }
+  printf '%s\n' "$TS_STUB" | "${DOCKER[@]}" exec -i "$CT" sh -c 'cat > /usr/local/bin/tailscale && chmod 755 /usr/local/bin/tailscale &&
+    mkdir -p /var/lib/tailscale-stub && printf "%s\n" STATE=Running OPERATOR= ROUTEALL=true ROUTES= HOST=old-name > /var/lib/tailscale-stub/state' ||
+    { echo "UBUNTU: couldn't install the tailscale stub"; exit 1; }
   for _ in $(seq 60); do
     [[ "$("${DOCKER[@]}" exec "$CT" systemctl is-system-running 2>/dev/null)" =~ ^(running|degraded)$ ]] && return 0
     sleep 1
@@ -209,7 +238,9 @@ usnap() { # the container's state: the user's files and links, and the system's 
     sudo sha256sum /etc/sudoers.d/zz-aibrain /etc/ssh/sshd_config.d/50-aibrain.conf /etc/apt/sources.list.d/aibrain-* /etc/apt/keyrings/aibrain-* 2>&1
     echo "managed settings: $(test -e /etc/claude-code/managed-settings.json && echo present || echo none)"
     for u in ssh.service ssh.socket tailscaled.service; do echo "$u: $(systemctl is-enabled $u 2>/dev/null) $(systemctl is-active $u 2>/dev/null)"; done
-    echo "session-state folder: $(stat -c %a .local/state/aibrain/sessions 2>/dev/null || echo missing)"'
+    echo "session-state folder: $(stat -c %a .local/state/aibrain/sessions 2>/dev/null || echo missing)"
+    echo "tailscale: $(tailscale status | jq -r .BackendState)"
+    echo "tailscale prefs: $(tailscale debug prefs | jq -r "[.OperatorUser, .RouteAll, ((.AdvertiseRoutes // []) | join(\",\")), .Hostname] | map(tostring) | join(\"|\")")"'
 }
 ucheck_twice() { # ucheck_twice <snap file prefix>: run the checkout's copy again and compare
   usnap > "$1.snap1"; echo "--- run 2 (checkout)"; urun 0 /home/user/Projects/aibrain/bootstrap.sh | grep -v '^==>'; usnap > "$1.snap2"
@@ -361,6 +392,8 @@ ubuntu)
   echo "--- run 1 (pasted, agent token, AIBRAIN_COMPUTER=ubuntu-box)"; urun 1 /fixtures/pasted.sh AIBRAIN_COMPUTER=ubuntu-box | grep -v '^==>'
   ucheck_twice "$U"; echo "--- end state"; cat "$U.snap2"
   s="$(cat "$U.snap2")"
+  # TS_ACCEPT_ROUTES=0 turns off the routes an earlier join accepted
+  if [[ "$s" == *"tailscale prefs: user|false||old-name"* ]]; then echo "UBUNTU_NO_ROUTES: yes"; else echo "UBUNTU_NO_ROUTES: NO"; fi
   if [[ "$s" == *"computer: ubuntu-box"* && "$s" == *"commands: op gh codex mise python3 jq "* &&
         "$s" != *"claude "* && "$s" == *"managed settings: none"* && "$s" == *"hypr bindings: none"* &&
         "$s" == *"session-state folder: missing"* && "$s" == *"tailscaled.service: enabled active"* &&
@@ -375,6 +408,19 @@ ubuntu)
   else
     echo "PRIVACY_SCAN: NO"
   fi
+  # A first join, in a terminal: it doesn't accept routes, not even before a later set
+  echo "--- run 3 (checkout, in a terminal, after tailscale logout)"
+  "${DOCKER[@]}" exec "$CT" sh -c 'tailscale logout && : > /var/lib/tailscale-stub/log'
+  printf '%s\n' 'exec script -qec "bash $HOME/Projects/aibrain/bootstrap.sh" /dev/null' > "$ROOT/in-terminal.sh"
+  urun 0 /fixtures/in-terminal.sh AIBRAIN_SETUP=light | tr -d '\r' | grep -v '^==>'
+  log="$("${DOCKER[@]}" exec "$CT" cat /var/lib/tailscale-stub/log)"; echo "--- tailscale calls"; echo "$log"
+  ucheck_twice "$U.join"; s="$(cat "$U.join.snap2")"
+  if [[ "$log" == "up --reset --accept-routes=false --operator=user --hostname=old-name" &&
+        "$s" == *"tailscale: Running"* && "$s" == *"tailscale prefs: user|false||old-name"* ]]; then
+    echo "UBUNTU_JOIN_NO_ROUTES: yes"
+  else
+    echo "UBUNTU_JOIN_NO_ROUTES: NO"; cat "$U.join.snap2"
+  fi
   ;;
 ubuntu-claude)
   # Ubuntu 24.04 with every default: Claude Code and its managed settings. Then the same computer turns
@@ -383,7 +429,7 @@ ubuntu-claude)
   echo "--- run 1 (pasted, agent token, AIBRAIN_COMPUTER=ubuntu-claude-box)"; urun 1 /fixtures/pasted.sh AIBRAIN_COMPUTER=ubuntu-claude-box | grep -v '^==>'
   ucheck_twice "$U"; s="$(cat "$U.snap2")"
   if [[ "$s" == *"commands: op gh codex claude mise"* && "$s" == *"managed settings: present"* &&
-        "$s" == *"session-state folder: 700"* && "$s" == *"hypr bindings: none"* ]]; then
+        "$s" == *"session-state folder: 700"* && "$s" == *"hypr bindings: none"* && "$s" == *"tailscale prefs: user|true||old-name"* ]]; then
     echo "UBUNTU_CLAUDE: yes"
   else
     echo "UBUNTU_CLAUDE: NO"; cat "$U.snap2"
@@ -391,7 +437,8 @@ ubuntu-claude)
   echo "--- run 3 (checkout, AIBRAIN_COMPUTER=ubuntu-box: Codex-only now)"
   urun 0 /home/user/Projects/aibrain/bootstrap.sh AIBRAIN_COMPUTER=ubuntu-box | grep -v '^==>'
   ucheck_twice "$U.codex"; s="$(cat "$U.codex.snap2")"
-  if [[ "$s" == *"commands: op gh codex mise"* && "$s" != *"claude "* && "$s" == *"managed settings: none"* ]]; then
+  if [[ "$s" == *"commands: op gh codex mise"* && "$s" != *"claude "* && "$s" == *"managed settings: none"* &&
+        "$s" == *"tailscale prefs: user|false||old-name"* ]]; then
     echo "UBUNTU_TO_CODEX_ONLY: yes"
   else
     echo "UBUNTU_TO_CODEX_ONLY: NO"; cat "$U.codex.snap2"

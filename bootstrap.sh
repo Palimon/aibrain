@@ -44,6 +44,7 @@ defaults() {
   SKIP_REPOS=()                   # repos a full setup doesn't clone
   # Usually set for one computer:
   TS_SHARE_LAN=""                 # the LAN this computer shares with the tailnet as a subnet router, e.g. 192.0.2.0/24
+  TS_ACCEPT_ROUTES=""             # 0: don't accept the tailnet's routes, on a LAN another computer shares (README, "Computers")
   OS_AGENT_DIRS=()                # the OS agent's folder: the first of these that exists, else ~/osagent
   HYPR_IGNORE_KEY_UNKNOWN=""      # 1: Hyprland ignores unsupported key reports (README, "Unsupported keyboard reports")
   HEADLESS=""                     # 1: no desktop: no Hyprland keys, Taildrop, bar widget or web app (README, "Computers")
@@ -678,12 +679,14 @@ fi
 # "Tailscale auth key" item in the vault when there is one, and otherwise with a browser login.
 # A computer with TS_SHARE_LAN set shares that LAN instead: it advertises the LAN, forwards IPv4 for
 # it, and doesn't accept routes, because it reaches that LAN directly. Its route needs approving once
-# in the admin console. On Ubuntu the package comes from Tailscale's apt repo. Without a desktop, Taildrop
+# in the admin console. A computer with TS_ACCEPT_ROUTES=0 doesn't accept routes either: it sits on a
+# LAN that another computer shares, and accepted, that LAN's route would send its own LAN traffic,
+# replies included, into the tailnet. It doesn't accept them even while it first joins. On Ubuntu the package comes from Tailscale's apt repo. Without a desktop, Taildrop
 # receiving, the bar widget and the web app are left out.
 TS_SYSCTL=/etc/sysctl.d/99-aibrain-tailscale.conf
 ts_up() { [[ "$(tailscale status --json 2>/dev/null | jq -r '.BackendState // empty')" == Running ]]; }
 ts_prefs() { tailscale debug prefs 2>/dev/null || true; }
-ts_accept() { if [[ -n "$TS_SHARE_LAN" ]]; then echo false; else echo true; fi; }
+ts_accept() { if [[ -n "$TS_SHARE_LAN" || "$TS_ACCEPT_ROUTES" == 0 ]]; then echo false; else echo true; fi; }
 ts_prefs_ok() {
   [[ "$(ts_prefs | jq -r '[.OperatorUser, .RouteAll, ((.AdvertiseRoutes // []) | join(","))] | map(tostring) | join("|")')" == "$USER|$(ts_accept)|$TS_SHARE_LAN" ]]
 }
@@ -710,7 +713,7 @@ elif pkg_missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_
     tsd_running || sudo systemctl enable --now tailscaled.service
     if ! ts_up; then
       # --reset so joining leaves exactly these settings, whatever an earlier setup left behind
-      up=(sudo tailscale up --reset --accept-routes --operator="$USER")
+      up=(sudo tailscale up --reset --accept-routes="$(ts_accept)" --operator="$USER")
       # --reset also drops a machine name given with --hostname. Keep it; a first join uses this
       # computer's name, so after a reinstall the tailnet knows it by its old name again.
       ts_host="$(ts_prefs | jq -r '.Hostname // empty')"

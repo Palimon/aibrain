@@ -8,6 +8,7 @@ Settings for this computer, read after `../config.sh`, so a value here wins. `bo
 
 ```sh
 TS_SHARE_LAN="192.0.2.0/24"     # this computer shares its LAN with the tailnet
+TS_ACCEPT_ROUTES=0              # another computer shares this computer's LAN, so it doesn't accept routes
 OS_AGENT_DIRS=(/srv/osagent)    # the OS agent keeps its memory on another disk
 HYPR_IGNORE_KEY_UNKNOWN=1       # this computer's keyboard sends unsupported key reports
 HEADLESS=1                      # a server: no desktop

@@ -28,6 +28,9 @@ GIT_EMAIL=""
 # The LAN this computer shares with your tailnet as a subnet router.
 #TS_SHARE_LAN="192.0.2.0/24"
 
+# 0: don't accept the tailnet's routes, on a computer whose LAN another computer shares (README, "Computers").
+#TS_ACCEPT_ROUTES=0
+
 # The OS agent's folder (Ctrl+Super+Shift+A): the first of these that exists, else ~/osagent.
 #OS_AGENT_DIRS=(/srv/osagent)
 
