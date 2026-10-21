@@ -56,7 +56,7 @@ allow "sed -i 's/rm x/del x/' notes.txt"
 allow "awk '/rm /{print}' notes.txt"
 allow "echo \$'it\\'s' && rm -f /tmp/ok"
 
-# Targets it can't check, and every rm inside a string or heredoc, are refused.
+# Targets it can't check, and every rm in a string or heredoc another shell runs, are refused.
 deny 'rm -rf "$D"'
 deny 'T=$(mktemp -d); echo "$T"; rm -r "$T"'
 deny 'rm -rf $(find . -name __pycache__)'
@@ -101,12 +101,40 @@ deny "echo \$'it\\'s'; rm -rf \"\$D\""
 deny 'cat <<\EOF | bash
 rm -f /tmp/x
 EOF'
-deny 'mkdir -p /tmp/r && cat > /tmp/r/run.sh <<'"'EOF'"'
-#!/usr/bin/env bash
-base=~/scratch/r
-rm -rf "$base"
+deny "bash -c 'rm -rf '\"\$D\""
+deny "ssh host 'rm -rf '\"\$dir\""
+deny "git submodule foreach --recursive 'rm -rf build'"
+deny 'git submodule foreach rm -rf build'
+deny "git submodule foreach --quiet 'git clean -fdx; rm -rf \"\$sm_path/build\"'"
+deny '$SUDO rm -rf "$D"'
+deny "echo 'rm -rf x' | sudo sh"
+deny 'trap rm\ -f\ \"\$T\" EXIT'
+
+# A heredoc a shell reads is a script; an unquoted one no shell reads still runs its $(...).
+IFS= read -r -d '' h1 <<'X'
+ssh -o BatchMode=yes host <<'EOF'
+rm -rf ~/scratch/x
 EOF
-bash /tmp/r/run.sh'
+X
+deny "$h1"
+IFS= read -r -d '' h2 <<'X'
+sudo bash -s <<'EOF'
+rm -rf "$D"
+EOF
+X
+deny "$h2"
+IFS= read -r -d '' h3 <<'X'
+cat <<'EOF' | ssh host bash -s
+rm -rf "$D"
+EOF
+X
+deny "$h3"
+IFS= read -r -d '' h4 <<'X'
+cat > /tmp/notes.txt <<EOF
+It's done: $(rm -rf "$D")
+EOF
+X
+deny "$h4"
 
 # An apostrophe in a heredoc inside "$(...)" doesn't hide what comes after it.
 IFS= read -r -d '' c1 <<'X'
@@ -164,6 +192,47 @@ git commit -F - <<'EOF'
 EOF
 X
 allow "$c4"
+allow 'git ls-files | xargs grep -n -w rm'
+allow 'find . -exec grep -l "rm" {} +'
+allow 'sudo grep -c "rm -f /tmp" log'
+allow 'gh issue create --title tmux --body "rm -rf the build dir"'
+allow "python3 -c 'rm = 3; print(rm)'"
+
+# A heredoc no shell reads, with a quoted delimiter, is only text: a commit or PR body, or a file.
+IFS= read -r -d '' p1 <<'X'
+git commit -m "$(cat <<'EOF'
+Replaces `rm -rf $TMP` with a trap
+chore: drop the stale cache (rm -rf .cache)
+Tidy up; rm stale fixtures
+build first, then rm the old artifacts
+explain why find | xargs rm was replaced
+rm -rf build && make
+EOF
+)"
+X
+allow "$p1"
+IFS= read -r -d '' p2 <<'X'
+gh pr create --title t --body "$(cat <<'EOF'
+Tidy up; rm stale fixtures
+EOF
+)"
+X
+allow "$p2"
+IFS= read -r -d '' p3 <<'X'
+mkdir -p /tmp/r && cat > /tmp/r/run.sh <<'EOF'
+#!/usr/bin/env bash
+base=~/scratch/r
+rm -rf "$base"
+EOF
+bash /tmp/r/run.sh
+X
+allow "$p3"
+IFS= read -r -d '' p4 <<'X'
+ssh host 'cat > /tmp/x.sh' <<'EOF'
+rm -rf "$D"
+EOF
+X
+allow "$p4"
 
 r="$(ev 'rm -rf "$D"')"
 names() { [[ "$1" == *'rm -rf \"$D\"'* ]]; }
