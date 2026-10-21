@@ -108,6 +108,63 @@ rm -rf "$base"
 EOF
 bash /tmp/r/run.sh'
 
+# An apostrophe in a heredoc inside "$(...)" doesn't hide what comes after it.
+IFS= read -r -d '' c1 <<'X'
+git commit -m "$(cat <<'EOF'
+Don't keep stale files
+EOF
+)" && rm -rf "$D"
+X
+deny "$c1"
+IFS= read -r -d '' c2 <<'X'
+gh pr create --title t --body "$(cat <<'EOF'
+Doesn't matter
+EOF
+)"
+rm -rf "$T"
+X
+deny "$c2"
+IFS= read -r -d '' c3 <<'X'
+git commit -m "$(cat <<'EOF'
+Don't keep stale files
+EOF
+)" && rm -f /tmp/ok
+X
+allow "$c3"
+
+# More runners and wrappers.
+deny "trap 'rm -rf \"\$T\"' EXIT"
+deny 'trap "rm -rf $T" EXIT'
+deny 'runuser -u build rm -rf "$D"'
+deny 'coproc rm -rf "$D"'
+deny '> out.log rm -rf "$D"'
+deny "\$SHELL -ec 'rm -rf \"\$D\"'"
+deny "script -qc 'rm -rf \"\$D\"' /dev/null"
+deny "git submodule foreach 'rm -rf build'"
+deny "nix-shell --run 'rm -rf build'"
+deny "tmux new-session -d 'rm -rf build'"
+deny 'watch -n 5 rm -f /tmp/x'
+deny 'eval "$(echo rm -rf x)"'
+
+# Text it can't follow is refused when it mentions rm.
+deny "echo 'oops; rm -rf build"
+deep='rm -rf /tmp/x'
+for _ in 1 2 3 4 5 6 7 8 9 10; do deep="echo \$($deep)"; done
+deny "$deep"
+
+# Not refused: rm as a word, a quoted literal path, a heredoc line that starts with "- rm".
+allow 'grep -rn rm .'
+allow 'sudo grep -rn rm /etc'
+allow "grep -c 'rm -rf' notes.txt"
+allow "rm -f 'out file.txt'"
+allow "echo \"it's\" && rm -f /tmp/x"
+IFS= read -r -d '' c4 <<'X'
+git commit -F - <<'EOF'
+- rm the old hook
+EOF
+X
+allow "$c4"
+
 r="$(ev 'rm -rf "$D"')"
 names() { [[ "$1" == *'rm -rf \"$D\"'* ]]; }
 scripts() { [[ "$1" == *'Write tool'* ]]; }
