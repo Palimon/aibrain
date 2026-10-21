@@ -9,9 +9,9 @@ path, or a relative path after cd, and about an rm that another shell runs (sh -
 like). This hook refuses all of those and a little more, so the agent gets the refusal at once with how to
 rewrite the command. At the top level a literal path passes, quoted or not, if it has no expansion or glob,
 and so does a "${VAR:?}" target. An rm in a script another shell runs never passes: a word after sh -c,
-ssh, eval or trap however it's quoted, a heredoc or here-string a shell reads (bash -eo pipefail <<EOF,
-cat <<EOF | sh), text echoed into a shell, or what a $(cat <<EOF) or <(echo ...) prints for a shell to
-run. A $(...) or <(...) that builds a shell's script any other way is refused when it mentions rm. A
+eval or trap however it's quoted, the command ssh runs on the far side, a heredoc or here-string a shell
+reads (bash -eo pipefail <<EOF, cat <<EOF | sh, { cat <<EOF; } | sh), text echoed into a shell, or what a
+$(cat <<EOF) or <(echo ...) prints for a shell to run. A $(...) or <(...) that builds a shell's script any other way is refused when it mentions rm. A
 quoted string or heredoc no shell runs, such as a commit message or a grep pattern, is only text, apart
 from the $(...) in it that the shell runs. Text it can't follow (a quote or paren that never closes, or
 nesting too deep) is refused when it mentions rm. If the hook itself fails, Claude Code runs the command
@@ -26,7 +26,7 @@ LIT = r"[A-Za-z0-9._/@+,:=%-]"  # characters of a literal path: no quotes, expan
 QLIT = r"[A-Za-z0-9._/@+,:=%^ -]"  # the same inside quotes, where a space is literal too
 ASSIGN = r"(?s)[A-Za-z_]\w*=.*"
 REDIR_OP = r"(\d*|&)(<<<|[<>]{1,2}&?)"  # a redirect whose target is the next word
-RM = re.compile(r"\brm(dir)?\b")
+RM = re.compile(r"(?:\b|(?<=\\[nt]))rm(dir)?\b")  # after \n too: echo -e and printf print a new line there
 HEREDOC = re.compile(r"<<(-?)[ \t]*(\\?)(['\"]?)([A-Za-z0-9_.-]+)\3")  # a quoted or \ delimiter: no expansion
 PLAIN = re.compile(r".[^\s\\'\"`$<>#&;|()]*", re.S)  # a run of characters with no special meaning
 FED = {"xargs", "parallel", "-exec", "-execdir", "-ok", "-okdir"}  # they hand rm its targets at run time
@@ -42,7 +42,23 @@ SSH_ARGS = "BbcDEeFIiJLlmOoPpQRSWw"  # ssh options that take a value
 SUDO_ARGS = "ugCDhprtUT"  # sudo options that take a value
 SUDO_LONG = {"--user", "--group", "--close-from", "--chdir", "--host", "--prompt", "--role", "--chroot", "--type",
              "--command-timeout", "--other-user"}
-FLAGS = {"-0", "--null", "-r", "--no-run-if-empty", "-t", "--verbose", "-E", "-H", "-n", "-S"}  # wrapper flags, no value
+WRAPPER_ARGS = {  # option letters and long options that take the next word as a value, and words before the command
+    "sudo": (SUDO_ARGS, SUDO_LONG, 0), "doas": ("uC", set(), 0), "ssh": (SSH_ARGS, set(), 1),
+    "timeout": ("ks", {"--kill-after", "--signal"}, 1), "nice": ("n", {"--adjustment"}, 0),
+    "ionice": ("cnpPu", {"--class", "--classdata", "--pid", "--pgid", "--uid"}, 0),
+    "xargs": ("adEILnPs", {"--arg-file", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines",
+                           "--process-slot-var"}, 0),
+    "env": ("uCS", {"--unset", "--chdir", "--split-string"}, 0), "stdbuf": ("ioe", {"--input", "--output", "--error"}, 0),
+    "flock": ("wEc", {"--timeout", "--wait", "--conflict-exit-code", "--command"}, 1),
+    "chroot": ("", {"--userspec", "--groups"}, 1), "taskset": ("", set(), 1), "chrt": ("T", set(), 1),
+    "runuser": ("ugGw", {"--user", "--group", "--supp-group", "--whitelist-environment", "--shell", "--command",
+                         "--session-command"}, 0),
+    "watch": ("dn", {"--interval"}, 0), "exec": ("a", set(), 0), "nsenter": ("tSG", {"--target"}, 0),
+    "strace": ("abeEIoOpPsSuX", {"--output", "--trace", "--attach", "--string-limit", "--user"}, 0),
+    "systemd-run": ("pEMuHG", {"--unit", "--property", "--setenv", "--machine", "--uid", "--gid", "--host", "--slice",
+                               "--description", "--working-directory", "--nice"}, 0),
+}
+START = ("cmd", None, 0, 0)  # what the next word can be, the wrapper whose options come next, words to skip, its words left
 RUN_WORDS = {"--command", "--run", "foreach"}  # a quoted word after one is a script: git submodule foreach
 LEADS = KEYWORDS | WRAPPERS | REMOTE
 SUBCOMMANDS = {"git", "docker", "podman", "kubectl", "npm", "pnpm", "yarn", "bun", "cargo", "pip", "pip3", "uv",
@@ -66,6 +82,11 @@ def background(data):
 
 def bare(w):
     return re.sub(r"[\\'\"]", "", w)
+
+
+def mentions_rm(t):
+    """True when shell text names rm or rmdir as a word, with its quotes and escapes or without them."""
+    return RM.search(bare(t)) is not None or RM.search(t) is not None
 
 
 def dequote(w):
@@ -182,20 +203,44 @@ def operands(words):
     return out
 
 
-def at_command(words, k):
-    """True when words[k] is the command its simple command runs: the first word, or one right after a
-    wrapper, keyword, VAR=value word, redirect or a wrapper's flag that takes no value."""
-    while k > 0:
-        p = bare(words[k - 1])
-        if re.fullmatch(REDIR_OP, p):
-            return False  # words[k] is the redirect's target
-        if k > 1 and re.fullmatch(REDIR_OP, bare(words[k - 2])):
-            k -= 2
-        elif redirect(p):
-            k -= 1
-        else:
-            return p in LEADS or p in FLAGS or re.fullmatch(ASSIGN, p) is not None
-    return True
+def step(state, w):
+    """Read one word of a simple command: "cmd" when it is a command name, "kw" for a keyword or VAR=value word
+    where a command could be, "" otherwise; and the state for the next word."""
+    mode, wrapper, skip, left = state
+    b = bare(w)
+    if skip:
+        return "", (mode, wrapper, skip - 1, left)
+    if re.fullmatch(REDIR_OP, b):
+        return "", (mode, wrapper, 1, left)
+    if redirect(b):
+        return "", state
+    if mode == "args":
+        return "", ("cmd" if b in FED and b.startswith("-") else "args", None, 0, 0)  # find -exec runs a command
+    if wrapper and b.startswith("-") and len(b) > 1:
+        short, names, _ = WRAPPER_ARGS.get(wrapper, ("", set(), 0))
+        if b == "--":
+            return "", (mode, None, 0, left)
+        return "", (mode, wrapper, int(b in names) if b.startswith("--") else option_words(b, short) - 1, left)
+    if left:
+        return "", (mode, wrapper, 0, left - 1)  # timeout's duration, flock's file, ssh's host
+    if b in KEYWORDS or re.fullmatch(ASSIGN, b):
+        return "kw", START
+    name = os.path.basename(b)
+    if name in WRAPPERS or name in REMOTE:
+        return "cmd", ("cmd", name, 0, WRAPPER_ARGS.get(name, ("", set(), 0))[2])
+    return "cmd", ("args", None, 0, 0)
+
+
+def commands_at(words):
+    """The indexes of the words in a simple command that are command names: the first, or the word after a
+    keyword, VAR=value word or redirect, after a wrapper with its options, their values and its own words
+    (timeout 60, flock FILE, ssh HOST), or after find's -exec."""
+    out, state = set(), START
+    for k, w in enumerate(words):
+        kind, state = step(state, w)
+        if kind == "cmd":
+            out.add(k)
+    return out
 
 
 def flag_letters(o, valued):
@@ -225,32 +270,60 @@ def shell_reads_stdin(opts):
         elif x.startswith("--"):
             j += 2 if x in ("--rcfile", "--init-file") else 1
         else:
-            return False  # a script file
+            return x in ("/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")  # otherwise a script file
     return True
+
+
+def remote_words(rest, before):
+    """The words of the command ssh runs on the far side, given the words after its name and the names before
+    it: past its options and host, and up to parallel's ::: arguments."""
+    j = 0
+    for host in (True, False):  # options and the host, then any options after the host
+        while j < len(rest) and bare(rest[j]).startswith("-") and bare(rest[j]) != "--":
+            j += option_words(bare(rest[j]), SSH_ARGS)
+        j += ([bare(x) for x in rest[j:j + 1]] == ["--"]) + host
+    command = rest[j:]
+    if "parallel" in before:
+        command = command[:next((i for i, x in enumerate(command) if bare(x).startswith(":::")), len(command))]
+    return command
+
+
+def ssh_remote(words):
+    """The raw words of the command an ssh in a simple command runs on the far side; empty when there's none."""
+    ops = operands(words)
+    names = [os.path.basename(bare(w)) for w in ops]
+    if "ssh" not in names:
+        return []
+    cmd_at = commands_at(ops)
+    for k, name in enumerate(names):
+        if name in TEXTUAL and k in cmd_at:
+            return []
+        if name == "ssh":
+            return remote_words(ops[k + 1:], set(names[:k]))
+    return []
 
 
 def reads_script(words, depth=0):
     """True when a simple command is a shell that reads its script on stdin: bash -eo pipefail, sudo -i,
     su - user, ssh host with no command, or ssh host bash -s."""
     ws = [bare(x) for x in operands(words)]
+    cmd_at = commands_at(ws)
     for k, w in enumerate(ws):
         name = os.path.basename(w)
-        if name in TEXTUAL and at_command(ws, k):
+        if name in TEXTUAL and k in cmd_at:
             return False
         if name == "ssh":
-            rest, j = ws[k + 1:], 0
-            for host in (True, False):  # options and the host, then any options after the host
-                while j < len(rest) and rest[j].startswith("-") and rest[j] != "--":
-                    j += option_words(rest[j], SSH_ARGS)
-                j += (rest[j:j + 1] == ["--"]) + host
-            command = rest[j:]
+            command = remote_words(ws[k + 1:], {os.path.basename(x) for x in ws[:k]})
             return not command or depth > 4 or any(
-                reads_script(c, depth + 1) for c in lex(" ".join(command))[0])
+                reads_script(c, depth + 1) for c in scan(" ".join(command))[0])
         if name in STDIN_SHELLS:
             return shell_reads_stdin(ws[k + 1:])
-        if name == "su":
+        if name in ("su", "runuser"):
+            rest = ws[k + 1:]
+            if name == "runuser" and any(x.startswith(("-u", "--user")) for x in rest):
+                continue  # runuser -u user command: what it runs is read as it comes
             return not any(x in ("--command", "--session-command") or x.startswith("--command=")
-                           or re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", x) for x in ws[k + 1:])
+                           or re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", x) for x in rest)
         if name in ("sudo", "doas"):
             rest, j, login = ws[k + 1:], 0, False
             while j < len(rest) and rest[j].startswith("-") and rest[j] != "--":
@@ -261,17 +334,20 @@ def reads_script(words, depth=0):
                 else:
                     login = login or bool(set(flag_letters(o, SUDO_ARGS)) & set("is"))
                     j += option_words(o, SUDO_ARGS)
+            j += rest[j:j + 1] == ["--"]
             if login and j >= len(rest):
                 return True
     return False
 
 
-def fed_to_shell(cmds, seps):
-    """For each command, whether it or one after it in its pipeline is a shell that reads its script on
-    stdin; one more False at the end."""
-    fed = [False] * (len(cmds) + 1)
+def fed_to_shell(cmds, seps, exits):
+    """For each command, whether it is a shell that reads its script on stdin or its output reaches one,
+    down a pipe or as the output of the { ...; } or ( ... ) group it is in; one more False at the end."""
+    fed, out = [False] * (len(cmds) + 1), [False] * (len(cmds) + 1)
     for j in range(len(cmds) - 1, -1, -1):
-        fed[j] = reads_script(cmds[j]) or (seps[j] == "|" and fed[j + 1])
+        x = exits[j]
+        out[j] = (seps[j] == "|" and fed[j + 1]) or (x is not None and out[x])
+        fed[j] = out[j] or reads_script(cmds[j])
     return fed
 
 
@@ -279,13 +355,30 @@ def scan(s):
     """Split shell text into simple commands (lists of raw words) and the separator after each, with the
     scripts nested in it that a shell runs ($(...), backticks, <(...), and a word another shell runs, such
     as sh -c or ssh, with its quotes removed), each heredoc as (body, quoted, index of its command), each
-    here-string as (text, index), each <(...) as (body, index), and whether a quote or paren never closes."""
+    here-string as (text, index), each <(...) as (body, index), whether a quote or paren never closes, and
+    for each command the command whose output its group's output is: the } of a { ...; } group, or the
+    last command of a ( ... ) group, when that isn't the command itself; else None."""
     cmds, seps, words, nested, heredocs, docs, strings, procs = [], [], [], [], [], [], [], []
-    word, inword, i, n, unclosed, herestring = "", False, 0, len(s), False, False
+    word, inword, i, n, unclosed, herestring, cstate = "", False, 0, len(s), False, False, START
     shell, runs, first, seen, called = False, False, None, set(), set()  # runs: the word is a script another shell runs
+    groups, stack, inner = [], [], []  # groups: [first command, exit command, enclosing group]
+
+    def open_group():
+        groups.append([len(cmds), None, stack[-1] if stack else None])
+        stack.append(len(groups) - 1)
+
+    def close_group(e):
+        if stack:
+            g = stack.pop()
+            groups[g][1] = e if e >= groups[g][0] else None
+
+    def end_command(sep):
+        cmds.append(words)
+        seps.append(sep)
+        inner.append(stack[-1] if stack else None)
 
     def end_word():
-        nonlocal word, inword, shell, runs, first, herestring
+        nonlocal word, inword, shell, runs, first, herestring, cstate
         if inword:
             if herestring:
                 strings.append((dequote(word), len(cmds)))
@@ -299,10 +392,16 @@ def scan(s):
                 ASSIGN, b)
             first = name if is_first else first
             seen.add(name)
-            if at_command(words, len(words) - 1):
+            kind, cstate = step(cstate, word)
+            if kind == "cmd":
                 called.add(name)
+                if b == "}":
+                    close_group(len(cmds))
+            elif kind == "kw" and b == "{":
+                open_group()
             textual = bool(TEXTUAL & called)
-            shell = shell or (name in SHELLS and not textual) or (is_first and b.startswith("$"))  # $SHELL -c
+            shell = shell or (name in SHELLS and (not textual or (name == "ssh" and "codespace" in seen))) or (
+                is_first and b.startswith("$"))  # $SHELL -c; gh codespace ssh runs a remote command
             runs = shell or name in RUN_WORDS or (runs and b.startswith("-")) or (
                 re.fullmatch(r"-[A-Za-z]*c", name) is not None and not textual
                 and not any(INTERPRETERS.fullmatch(x) for x in seen))
@@ -333,7 +432,7 @@ def scan(s):
             j = closing_paren(s, k)
             unclosed = unclosed or j >= n
             body = s[k + 1:j]
-            if s.startswith("((", k) and not RM.search(bare(body)):
+            if s.startswith("((", k) and not mentions_rm(body):
                 nested += substitutions(body)  # arithmetic, which runs only the $(...) in it
             else:
                 nested.append(body)
@@ -346,6 +445,7 @@ def scan(s):
         if s.startswith("<<<", i):
             end_word()
             words.append("<<<")
+            _, cstate = step(cstate, "<<<")
             herestring = True
             i += 3
             continue
@@ -371,10 +471,15 @@ def scan(s):
         if c in ";&|()\n":
             end_word()
             if words:
-                cmds.append(words)
-                seps.append(c)
+                end_command(c)
                 words = []
-            shell, runs, first, seen, called = False, False, None, set(), set()
+            elif c == "|" and seps[-1:] == [")"]:
+                seps[-1] = "|"  # ( ... ) | sh: the group's output goes down the pipe
+            if c == "(":
+                open_group()
+            elif c == ")":
+                close_group(len(cmds) - 1)
+            shell, runs, first, seen, called, cstate = False, False, None, set(), set(), START
             i += 1
             if c == "\n" and heredocs:
                 bodies, i = heredoc_bodies(s, i, [(d, t) for d, t, _, _ in heredocs])
@@ -387,19 +492,23 @@ def scan(s):
         i = m.end()
     end_word()
     if words:
-        cmds.append(words)
-        seps.append("")
-    return cmds, seps, nested, unclosed, docs, strings, procs
+        end_command("")
+    exits = []
+    for j, g in enumerate(inner):
+        while g is not None and groups[g][1] == j:
+            g = groups[g][2]  # the group's last command: its output is the enclosing group's
+        exits.append(groups[g][1] if g is not None else None)
+    return cmds, seps, nested, unclosed, docs, strings, procs, exits
 
 
 def lex(s):
     """Split shell text into simple commands (lists of raw words), the scripts nested in it that a shell
     runs, whether a quote or paren in it never closes, and the $(...) or <(...) bodies that build a
     shell's script at run time. The scripts are those scan finds; a heredoc or here-string a shell reads,
-    or the $(...) in an unquoted heredoc no shell reads; text echoed into a shell; and what a $(...) in
-    command position, or a <(...) a shell reads, prints."""
-    cmds, seps, nested, unclosed, docs, strings, procs = scan(s)
-    fed = fed_to_shell(cmds, seps)
+    or the $(...) in an unquoted heredoc no shell reads; the command ssh runs on the far side, as one line;
+    text echoed into a shell; and what a $(...) in command position, or a <(...) a shell reads, prints."""
+    cmds, seps, nested, unclosed, docs, strings, procs, exits = scan(s)
+    fed = fed_to_shell(cmds, seps, exits)
     for body, quoted, owner in docs:
         if fed[owner]:
             nested.append(body)
@@ -410,8 +519,11 @@ def lex(s):
                 if {os.path.basename(bare(w)) for w in cmds[j]} & (STDIN_SHELLS | {"source", "."})}
     outputs = [b for b, owner in procs if owner in sourcing]  # bash <(...): a shell runs what it prints
     for j, ws in enumerate(cmds):
-        if head(ws) in ("echo", "printf") and seps[j] == "|" and fed[j + 1]:
+        if head(ws) in ("echo", "printf") and fed[j]:
             nested.append(echoed(ws))
+        remote = ssh_remote(ws)
+        if remote:
+            nested.append(" ".join(dequote(w) for w in remote))  # ssh host bash -c "'rm ...'"
         body = substituted(lead_word(ws))
         if body is not None:
             outputs.append(body)  # its output is the command that runs, or a shell's script
@@ -420,7 +532,7 @@ def lex(s):
         text = printed(body)
         if text is not None:
             nested.append(text)
-        elif RM.search(bare(body)):
+        elif mentions_rm(body):
             built.append(body)
     return cmds, nested, unclosed, built
 
@@ -428,7 +540,7 @@ def lex(s):
 def printed(text):
     """What a command prints when all it does is print text it holds: a cat of a heredoc or here-string,
     or an echo or printf of words. None when it does anything else."""
-    cmds, _, _, _, docs, strings, _ = scan(text)
+    cmds, _, _, _, docs, strings, _, _ = scan(text)
     out = []
     for j, ws in enumerate(cmds):
         h = head(ws)
@@ -442,10 +554,13 @@ def printed(text):
 
 
 def echoed(words):
-    """The text an echo or printf prints, near enough: its arguments with their quotes removed."""
+    """The text an echo or printf prints, near enough: its arguments with their quotes removed and echo's
+    options left out, with \\n read as a new line."""
     h = head(words)
     args = [dequote(w) for w in operands(words[[os.path.basename(bare(w)) for w in words].index(h) + 1:])]
-    return (" " if h == "echo" else "\n").join(args)
+    while args and (re.fullmatch(r"-[neE]+", args[0]) if h == "echo" else args[0] in ("--", "-v")):
+        args = args[1 + (args[0] == "-v"):]  # printf -v NAME
+    return (" " if h == "echo" else "\n").join(args).replace("\\n", "\n")
 
 
 def substituted(w):
@@ -495,26 +610,26 @@ def target_ok(w, after_cd):
 def problems(script, nested, after_cd, depth=0):
     """The rm commands in script that Claude Code would stop for approval."""
     if depth > 8:
-        return ["(nested too deep to check)"] if RM.search(bare(script)) else []
+        return ["(nested too deep to check)"] if mentions_rm(script) else []
     cmds, inner, unclosed, built = lex(script)
     found = [" ".join(b.split())[:50] + "  (a shell's script built at run time)" for b in built]
-    if unclosed and RM.search(bare(script)):
+    if unclosed and mentions_rm(script):
         found.append("(a quote or paren that never closes, so its rm can't be checked)")
     for words in cmds:
         first = head(words)
         if first in ("cd", "pushd"):
             after_cd = True
         text = " ".join(words)
-        if first == "eval" and any(re.search(r"[$`]", x) for x in words[1:]) and RM.search(bare(text)):
+        if first == "eval" and any(re.search(r"[$`]", x) for x in words[1:]) and mentions_rm(text):
             found.append(text[:50] + "  (eval of a script built at run time)")
-        before, aside = set(), set()
+        before, aside, cmd_at = set(), set(), commands_at(words)
         for k, w in enumerate(words):
             name = os.path.basename(bare(w))
             if bare(w) in (";", "+"):
                 aside.clear()  # the end of a find -exec command
             if name not in ("rm", "rmdir"):
                 before.add(name)
-                if name in ASIDE and at_command(words, k):
+                if name in ASIDE and k in cmd_at:
                     aside.add(name)
                 continue
             prev = bare(words[k - 1]) if k else None
@@ -553,7 +668,7 @@ def problems(script, nested, after_cd, depth=0):
 def main():
     data = json.load(sys.stdin)
     cmd = (data.get("tool_input") or {}).get("command") or ""
-    if data.get("tool_name") != "Bash" or not RM.search(bare(cmd)) or not background(data):
+    if data.get("tool_name") != "Bash" or not mentions_rm(cmd) or not background(data):
         return
     found = list(dict.fromkeys(problems(cmd, False, False)))
     if not found:

@@ -146,6 +146,33 @@ deny "${h5/-euo/-o}"
 deny "${h5/bash -euo pipefail/sudo -i}"
 deny "${h5/bash -euo pipefail/sudo su - build}"
 deny "${h5/bash -euo pipefail/ssh host -T}"
+deny "${h5/bash -euo pipefail/runuser -l deploy}"
+deny "${h5/bash -euo pipefail/bash /dev/stdin}"
+deny "${h5/bash -euo pipefail/sudo -i --}"
+deny "${h5/bash -euo pipefail/parallel -j4 ssh {} ::: h1 h2}"
+IFS= read -r -d '' g1 <<'X'
+{ cat <<'EOF'; } | bash
+rm -rf "$D"
+EOF
+X
+deny "$g1"
+IFS= read -r -d '' g2 <<'X'
+(cat <<'EOF') | bash
+rm -rf "$D"
+EOF
+X
+deny "$g2"
+deny "{ echo 'rm -rf \"\$D\"'; } | sh"
+deny 'echo -e "rm -rf $D\nls" | bash'
+deny "echo -n 'rm -rf /tmp/x' | sh"
+deny 'echo -e "cd /srv\nrm -rf cache" | ssh host'
+deny "echo -e 'rm -rf /var/cache/x/*' | sudo bash"
+deny "printf 'rm -rf %s\\n' \"\$D\" | sh"
+deny "ssh host bash -c \"'rm -rf /srv/x/*'\""
+deny "ssh host sudo sh -c \"'rm -rf /srv/x/*'\""
+deny "gh codespace ssh -c x -- 'rm -rf /srv/x/*'"
+deny "$(printf 'ssh h %.0s' {1..20})rm -rf /x"
+deny "$(printf 'ssh h %.0s' {1..300})rm -rf /x"
 IFS= read -r -d '' h6 <<'X'
 bash -c "$(cat <<'EOF'
 rm -rf "$D"
@@ -174,6 +201,13 @@ deny 'find docker -name x -exec rm {} +'
 deny 'sudo -u git rm -rf "$D"'
 deny "sudo -u git bash -c 'rm -rf \$D'"
 deny 'find . -exec grep -q x {} \; -exec rm {} \;'
+allow 'timeout 60 docker rm -f "$CID"'
+allow 'xargs -n1 docker rm -f'
+allow 'xargs -I{} docker rm -f {}'
+allow 'nice -n 10 git rm -r --cached "$f"'
+allow 'sudo -u deploy git -C /srv/app rm --cached "$f"'
+allow "ssh host 'grep -c rm /var/log/x'"
+allow '{ echo start; cat notes.txt; } > /tmp/log && rm -f /tmp/ok'
 
 # An apostrophe in a heredoc inside "$(...)" doesn't hide what comes after it.
 IFS= read -r -d '' c1 <<'X'
