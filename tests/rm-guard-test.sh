@@ -48,6 +48,13 @@ import subprocess
 subprocess.run(["rm", "-f", path])
 EOF'
 allow 'ls ~/perm/confirm'
+allow 'git -C /srv/repo rm -r --cached "$f"'
+allow 'git commit -m "rm dead code"'
+allow "gh pr create --title t --body '- rm the old hook'"
+allow 'grep -rn "rm -rf /tmp" .'
+allow "sed -i 's/rm x/del x/' notes.txt"
+allow "awk '/rm /{print}' notes.txt"
+allow "echo \$'it\\'s' && rm -f /tmp/ok"
 
 # Targets it can't check, and every rm inside a string or heredoc, are refused.
 deny 'rm -rf "$D"'
@@ -71,6 +78,29 @@ deny "ssh host 'rm -rf ~/scratch/k3fix && git clone -q https://example.com/r ~/s
 deny "nohup sh -c \"ssh host 'flock -w 3600 ~/lane.lock bash /tmp/check.sh; rm -f /tmp/check.sh'\" > /tmp/out 2>&1 &"
 deny "nohup sh -c \"ssh host 'mkdir -p ~/s && flock -w 60 ~/l sh -c \\\"set -x; rm -rf ~/s/x\\\"'\" &"
 deny 'x=`rm -f /tmp/y`'
+deny 'timeout 5m rm -rf "$D"'
+deny 'sudo -u root rm -rf "$D"'
+deny 'env -u FOO rm -rf "$D"'
+deny 'flock lockfile rm -rf "$D"'
+deny 'find . -print0 | xargs -0 -I {} rm -f {}'
+deny "xargs -d '\\n' rm"
+deny 'ssh host rm -rf ~/scratch/x'
+deny 'ssh -o BatchMode=yes host rm -f /tmp/x'
+deny 'eval rm -rf /tmp/x'
+deny 'eval "rm -rf /tmp/x"'
+deny "sh -c 'rm -f /tmp/a'"
+deny 'echo "$(rm -rf "$x")"'
+deny 'for d in a b; do cd /p/$d && rm -f out.log; done'
+deny 'if cd /tmp/x; then rm -f out.log; fi'
+deny '2>/dev/null rm -rf "$D"'
+deny 'busybox rm -rf "$D"'
+deny 'r\m -rf "$D"'
+deny 'rm -rf //'
+deny 'rm -rf "${D:?}/.."'
+deny "echo \$'it\\'s'; rm -rf \"\$D\""
+deny 'cat <<\EOF | bash
+rm -f /tmp/x
+EOF'
 deny 'mkdir -p /tmp/r && cat > /tmp/r/run.sh <<'"'EOF'"'
 #!/usr/bin/env bash
 base=~/scratch/r
