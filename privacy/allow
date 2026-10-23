@@ -3,6 +3,7 @@
 # personal denylist. Add to it only for text that identifies nobody.
 noreply@anthropic.com
 git@github.com
+noreply@github.com
 re:[\w.+-]+@users\.noreply\.github\.com
 re:[\w.+-]+@example\.(?:com|org|net)
 re:(?:[\w-]+\.)?example\.ts\.net
