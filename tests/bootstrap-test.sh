@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs bootstrap.sh in throwaway homes on tmpfs, so a change can be tested without touching the real
 # home. Each scenario runs the script twice and checks the second run changes nothing.
-# Needs OP_SERVICE_ACCOUNT_TOKEN set (every shell has it). Tests the last commit in this checkout.
+# Needs OP_SERVICE_ACCOUNT_TOKEN set (every shell has it unless a launcher sets AIBRAIN_NO_VAULT=1). Tests the last commit in this checkout.
 # Usage: tests/bootstrap-test.sh fresh|bashrc-migrate|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all
 #
 # Each home gets a personal layer cloned from a fixture made from personal.example, except in
@@ -288,7 +288,7 @@ EOF
      grep -Fxq '# Keep this user line.' "$H/.bashrc"; then
     echo "BASHRC_MIGRATED: yes"
   else
-    echo "BASHRC_MIGRATED: NO"; exit 1
+    echo "BASHRC_MIGRATED: NO"; rc=1; exit 1
   fi
   ;;
 fresh)
