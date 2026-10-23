@@ -89,7 +89,7 @@ PERSONAL_REPO="$FIXTURE"   # the script's AIBRAIN_PERSONAL_REPO
 EXTRA_ENV=()   # more variables for the script, such as AIBRAIN_SETUP
 run() { # run <with-env-token 0|1> <script>; no tty, no DBus (gh can't reach the real keyring)
   local tok=(); [[ $1 == 1 ]] && tok=(OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_ACCOUNT_TOKEN")
-  [[ " ${EXTRA_ENV[*]} " != *ubuntu-box* ]] || { echo "ubuntu-box is Codex-only, so only the ubuntu scenarios run as it"; exit 1; }
+  [[ " ${EXTRA_ENV[*]} " != *ubuntu-box* ]] || { echo "ubuntu-box is Codex-only, so only the ubuntu scenarios run as it"; rc=1; exit 1; }
   (cd "$H" && setsid -w env -i HOME="$H" USER="$USER" PATH=/usr/local/bin:/usr/bin TERM=dumb \
     XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" XDG_STATE_HOME="$H/.local/state" XDG_CACHE_HOME="$H/.cache" \
     DBUS_SESSION_BUS_ADDRESS=disabled: AIBRAIN_TEST_KEEP_TAILSCALE=1 AIBRAIN_REPO="$SRC" AIBRAIN_PERSONAL_REPO="$PERSONAL_REPO" "${tok[@]}" "${EXTRA_ENV[@]}" bash "$2" </dev/null 2>&1) | sed 's/\x1b\[[0-9;]*m//g'
@@ -359,7 +359,7 @@ EOF
      grep -Fq 'o.bind("SUPER + SHIFT + R", "SSH", "alacritty -e ssh x")' "$H/.config/hypr/bindings.lua"; then
     echo "UNKNOWN_KEY_FILTER: yes"
   else
-    echo "UNKNOWN_KEY_FILTER: NO"; exit 1
+    echo "UNKNOWN_KEY_FILTER: NO"; rc=1; exit 1
   fi
   EXTRA_ENV=(); check_twice; show
   ;;
@@ -498,5 +498,5 @@ ubuntu-claude)
     echo "UBUNTU_TO_CODEX_ONLY: NO"; cat "$U.codex.snap2"
   fi
   ;;
-*) echo "Usage: $0 fresh|bashrc-migrate|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all" >&2; exit 2 ;;
+*) echo "Usage: $0 fresh|bashrc-migrate|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all" >&2; rc=1; exit 2 ;;
 esac
