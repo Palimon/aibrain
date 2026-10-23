@@ -539,7 +539,8 @@ say "Updating ~/.bashrc"
 touch "$HOME/.bashrc"
 block="# >>> aibrain >>>
 # 1Password service account for AI agents (vault: $OP_VAULT). Managed by ~/Projects/aibrain/bootstrap.sh."'
-[[ -r ~/.config/op/aiagent-token ]] && export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"'
+# A launcher that sets AIBRAIN_NO_VAULT=1 keeps the token out of an agent'\''s shells.
+if [[ -n ${AIBRAIN_NO_VAULT:-} ]]; then unset OP_SERVICE_ACCOUNT_TOKEN; elif [[ -r ~/.config/op/aiagent-token ]]; then export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"; fi'
 # Omarchy puts mise's tools and ~/.local/bin on the PATH itself; elsewhere the block does, for agents' shells too
 [[ "$DISTRO" == omarchy ]] || block+='
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"'

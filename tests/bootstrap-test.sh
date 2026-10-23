@@ -2,7 +2,7 @@
 # Runs bootstrap.sh in throwaway homes on tmpfs, so a change can be tested without touching the real
 # home. Each scenario runs the script twice and checks the second run changes nothing.
 # Needs OP_SERVICE_ACCOUNT_TOKEN set (every shell has it). Tests the last commit in this checkout.
-# Usage: tests/bootstrap-test.sh fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all
+# Usage: tests/bootstrap-test.sh fresh|bashrc-migrate|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all
 #
 # Each home gets a personal layer cloned from a fixture made from personal.example, except in
 # no-personal (none, so the script makes one) and full, which clones a copy of your own personal layer
@@ -254,12 +254,43 @@ if [[ "${1:-}" != ubuntu* && "${1:-}" != all ]]; then
 fi
 if [[ "${1:-}" == all ]]; then
   HOST_BEFORE="$(host_state)"; rc=0
-  for s in fresh no-personal migrate projects-junk full unknown-key-binding picks computers worktrees ubuntu ubuntu-claude; do
+  for s in fresh bashrc-migrate no-personal migrate projects-junk full unknown-key-binding picks computers worktrees ubuntu ubuntu-claude; do
     echo "######## $s"; "$0" "$s" || rc=1
   done
   echo "######## all"; host_check || rc=1; exit "$rc"
 fi
 case "${1:-}" in
+bashrc-migrate)
+  # Both the previous managed block and older loose token lines must converge.
+  mkhome bashrc-migrate
+  cat >> "$H/.bashrc" <<'EOF'
+
+# 1Password service account for AI agents
+[[ -r ~/.config/op/aiagent-token ]] && export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"
+
+# >>> aibrain >>>
+# 1Password service account for AI agents (vault: aiagents). Managed by ~/Projects/aibrain/bootstrap.sh.
+[[ -r ~/.config/op/aiagent-token ]] && export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"
+# <<< aibrain <<<
+# Keep this user line.
+EOF
+  echo "--- run 1 (old bashrc block and loose lines)"; run 1 "$ROOT/pasted.sh"
+  cp "$H/.bashrc" "$H.bashrc1"
+  check_twice; show
+  comment="# A launcher that sets AIBRAIN_NO_VAULT=1 keeps the token out of an agent's shells."
+  token_line='if [[ -n ${AIBRAIN_NO_VAULT:-} ]]; then unset OP_SERVICE_ACCOUNT_TOKEN; elif [[ -r ~/.config/op/aiagent-token ]]; then export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"; fi'
+  if cmp -s "$H.bashrc1" "$H/.bashrc" &&
+     [[ "$(grep -Fxc '# >>> aibrain >>>' "$H/.bashrc")" == 1 ]] &&
+     [[ "$(grep -Fxc '# <<< aibrain <<<' "$H/.bashrc")" == 1 ]] &&
+     [[ "$(grep -Fxc "$comment" "$H/.bashrc")" == 1 ]] &&
+     [[ "$(grep -Fxc "$token_line" "$H/.bashrc")" == 1 ]] &&
+     [[ "$(grep -c 'aiagent-token' "$H/.bashrc")" == 1 ]] &&
+     grep -Fxq '# Keep this user line.' "$H/.bashrc"; then
+    echo "BASHRC_MIGRATED: yes"
+  else
+    echo "BASHRC_MIGRATED: NO"; exit 1
+  fi
+  ;;
 fresh)
   mkhome fresh; echo '{"theme":"light"}' > "$H/.claude/settings.json"
   echo "--- run 1 (pasted, agent token)"; run 1 "$ROOT/pasted.sh"; check_twice; show
@@ -467,5 +498,5 @@ ubuntu-claude)
     echo "UBUNTU_TO_CODEX_ONLY: NO"; cat "$U.codex.snap2"
   fi
   ;;
-*) echo "Usage: $0 fresh|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all" >&2; exit 2 ;;
+*) echo "Usage: $0 fresh|bashrc-migrate|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all" >&2; exit 2 ;;
 esac

@@ -175,7 +175,7 @@ The research, the cost numbers and every decision so far are in `study/workspace
 - The 1Password CLI, from Omarchy's package repo, or on Ubuntu from 1Password's apt repo.
 - Python, which the Claude Code hooks run on, a private `~/.local/state/aibrain/sessions` folder for them, and a check that the session-state hook runs (see [Long sessions](#long-sessions)).
 - Claude Code and the GitHub CLI, through mise. A Codex-only computer gets no Claude Code, and off Omarchy it gets Codex through mise.
-- The aiagent token in `~/.config/op/aiagent-token`, and a block in `~/.bashrc` that loads it in every shell, including the agents' shells.
+- The aiagent token in `~/.config/op/aiagent-token`, and a block in `~/.bashrc` that loads it in every shell, including the agents' shells. A launcher sets `AIBRAIN_NO_VAULT=1` to keep the token out of an agent's shells.
 - The GitHub CLI logged in with the token stored in the vault, and git using it for github.com.
 - git's name and email from `config.sh`, and in this repo the privacy hooks and the public identity.
 - On a full setup, every repo on your GitHub account that isn't archived or empty, cloned into `~/Projects/<name>`. A folder that's already there is left alone. Repos in `SKIP_REPOS` are skipped.
