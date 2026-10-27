@@ -50,9 +50,3 @@ A check running automatically does not mean it blocks an invalid result. Verify 
 - The agent performing the operation cannot disable the gate or rewrite its evidence through the same permissions. A local hook in an agent-writable checkout provides a weaker guarantee than a separately controlled acceptance check.
 
 State the actual boundary. Distinguish a formatter that corrects edits, a test that detects errors, and a gate that refuses publication. An acknowledgment file proves that a file was written; it does not prove that the agent reflected, reviewed, or understood the work.
-
-## Retrospectives and hooks
-
-Keep analysis and enforcement separate. Retro identifies failures; this skill chooses and implements the remedy. A hook can trigger that work or require a recorded workflow state, but cannot establish the quality of the analysis.
-
-When automatic retros are requested, use a supported lifecycle event and an explicit scope such as a completed task or requested retrospective. Define what counts as completion before selecting the event. Include a per-scope completion record, bounded retries, and handling for interruption, re-entry, and hook failures. Do not assume that every assistant turn or session stop completes a task. Keep recurring setup edits out of an unconditional stop loop.
