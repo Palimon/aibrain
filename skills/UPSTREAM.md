@@ -12,7 +12,7 @@ Each upstream path below is relative to its `skills/` folder. Locally, each skil
 | `improve-codebase-architecture` | `engineering/improve-codebase-architecture` | `codebase-design`, `grilling`, `domain-modeling` |
 | `to-spec` | `engineering/to-spec` | Per-project configuration from `setup-matt-pocock-skills` |
 | `implement` | `engineering/implement` | `tdd`, `code-review` |
-| `retro` | `engineering/retro` | `writing-for-agents`; local `apply-learnings` |
+| `retro` | `engineering/retro` | `writing-for-agents` |
 | `grill-me` | `productivity/grill-me` | `grilling` |
 | `handoff` | `productivity/handoff` | None |
 | `triage` | `engineering/triage` | `grilling`, `domain-modeling`; tracker and label configuration |
@@ -42,7 +42,7 @@ Mentions of other commands in templates or examples are not dependencies. This s
 - The setup command writes its configuration to the canonical `AGENTS.md`, consistent with this setup's instructions. The upstream version prefers `CLAUDE.md` when both exist.
 - Setup provisions the roles needed by the installed skills: two categories and five states for `triage`, or `ready-for-agent` for `to-spec` alone. This fixes upstream's omission of categories and its label-setup dependency on `triage`. Explicit project opt-outs remain supported; otherwise `to-spec` requires its mapping and applies the configured label.
 - Setup writes a `labels.json` manifest alongside its role documentation. The local `aibrain-labels` helper and bootstrap synchronize that manifest with GitHub. This helper and manifest template are aibrain additions. The local-file tracker template makes triage status conditional on enabling triage.
-- Retro finishes by invoking the local `apply-learnings` skill to implement findings within the current authorization. Analysis-only requests still produce proposals. Preserve this final step when updating the upstream copy. `apply-learnings` is an original local skill and uses the existing `unslop` skill for changed prose.
+- Retro presents findings and asks whether the user wants to run `/apply-learnings`. It does not invoke that skill automatically. Preserve this final question when updating the upstream copy. `apply-learnings` is a separate original local skill and uses the existing `unslop` skill for changed prose.
 
 The rest of the upstream workflows are retained, including their confirmation points and use of subagents. Installing a skill does not run it.
 

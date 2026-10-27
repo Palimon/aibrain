@@ -1,6 +1,6 @@
 ---
 name: apply-learnings
-description: Apply retrospective findings and recurring agent corrections through code, automated checks, and enforced workflows. Use after retro, or when an agent keeps skipping a required step or breaking a rule.
+description: Apply retrospective findings and recurring agent corrections through code, automated checks, and enforced workflows. Use when asked to apply learnings or prevent an agent from skipping a required step or breaking a rule.
 ---
 
 # Apply learnings

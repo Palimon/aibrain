@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 Skill loading: use the Skill tool when available. Otherwise read and follow the named skill's `SKILL.md`, using its path in the available-skills list or `../<skill-name>/SKILL.md` relative to this folder.
 
-Conduct the requested retrospective, then apply its findings to the coding agent's environment through `apply-learnings`.
+Conduct the requested retrospective and suggest improvements to the coding agent's environment.
 
 ## Steps
 
@@ -26,7 +26,7 @@ Conduct the requested retrospective, then apply its findings to the coding agent
 
 4. Summarize the findings in order of severity, with evidence from the session. Separate demonstrated failures from uncertain candidates.
 
-5. Load and follow `apply-learnings` to apply the findings within the current authorization. Use the Skill tool when available; otherwise read `../apply-learnings/SKILL.md`. If the user requested analysis only, preserve that scope and report proposed fixes without applying them. Finish with the changes, verification results, and unresolved findings. Do not end with suggestions when the requested fixes are authorized and can be completed.
+5. After presenting the findings, ask whether the user wants to run `/apply-learnings` to implement them. Keep retro as analysis and recommendations. Run `apply-learnings` only when the user requests it.
 
 ## Reference
 
