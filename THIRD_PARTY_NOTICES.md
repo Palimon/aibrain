@@ -1,6 +1,12 @@
 # Third-party notices
 
-These skills come from other projects, under the MIT License. Their notices are below, as that license requires.
+These skills come from other projects. Each keeps the license identified below.
+
+## skills/webapp-testing
+
+From [anthropics/skills](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing), revision `dbd4588f9e1033efb41dad4bef2f7947c8993d44`, retrieved 2026-10-27. The skill, server helper and examples are unchanged. The complete Apache License, Version 2.0 and upstream notice are in [skills/webapp-testing/LICENSE.txt](skills/webapp-testing/LICENSE.txt).
+
+> Copyright 2026 Anthropic, PBC.
 
 ## Selected skills from mattpocock/skills
 

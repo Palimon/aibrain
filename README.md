@@ -123,7 +123,7 @@ To check by hand: `python3 -I privacy/scan.py tree` for the files, `python3 -I p
 | Path | What it is | Linked to |
 |---|---|---|
 | `bootstrap.sh` | The setup script | Nothing; run it |
-| `skills/` | Skills, one folder each | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.pi/agent/skills`, `~/.hermes/skills` (the folders Omarchy uses for its own skills) |
+| `skills/` | Skills, one folder each | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.grok/skills`, `~/.pi/agent/skills`, `~/.hermes/skills`, and existing Hermes profiles |
 | `claude/` | Claude Code's own config | `~/.claude/settings.json`, `~/.claude/keybindings.json` |
 | `claude/agents/` | Claude Code subagent definitions for every project: the contractors and the general employees (see [Subagents](#subagents)) | `~/.claude/agents`, one link per file |
 | `claude/managed-settings.json` | Claude Code's default model and effort, Opus at medium | Copied to `/etc/claude-code/managed-settings.json` |
@@ -142,6 +142,8 @@ Because these are links, editing a file in either place changes the same file. W
 The selected engineering and productivity skills from `mattpocock/skills` are committed under `skills/`, with their dependencies, reference files and Codex picker metadata. Bootstrap links the complete folders into each tool's skill directory, including on an existing installation. There is no upstream plugin or automatic update to install.
 
 See [skills/UPSTREAM.md](skills/UPSTREAM.md) for the pinned source revision, dependency list, local changes, update procedure and per-project configuration needed before using the issue-tracker skills. The copyright and MIT license are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Anthropic's [`webapp-testing`](skills/webapp-testing/SKILL.md) is also included, with its server helper, examples and Apache 2.0 license. Bootstrap links its complete folder into the same skill directories and existing Hermes profiles. Running its browser examples requires Python Playwright and Chromium in the test environment; installing the skill does not install those dependencies.
 
 The local [`apply-learnings`](skills/apply-learnings/SKILL.md) skill turns retrospective findings and recurring agent corrections into fixes. It prefers changes to code, constraints, executable workflows, checks and blocking gates before hooks or prose. `retro` presents its findings and asks whether to run `/apply-learnings`; it does not apply them automatically. Both skills are linked into every skill directory listed above. Loading the skills does not guarantee compliance, and the skill requires verification of each implemented check or gate.
 

@@ -71,10 +71,11 @@ INSTRUCTION_FILES=(
   "$HOME/.grok/AGENTS.md"
 )
 # Every skill in skills/, here and in the personal layer, is linked into each of these: the folders
-# Omarchy links its own skills into. Vendored skills include their reference files and agents/ metadata
-# in the same folder; link the whole folder. Sources and manual updates are in skills/UPSTREAM.md.
+# Omarchy links its own skills into. Vendored skills include their reference files, scripts, examples,
+# licenses and agents/ metadata in the same folder; link the whole folder, including webapp-testing.
+# Sources and manual updates are in skills/UPSTREAM.md.
 # This includes retro and the separate apply-learnings skill; keep both in every destination.
-SKILL_DIRS=("$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.pi/agent/skills" "$HOME/.hermes/skills")
+SKILL_DIRS=("$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.grok/skills" "$HOME/.pi/agent/skills" "$HOME/.hermes/skills")
 for p in "$HOME"/.hermes/profiles/*/; do [[ -d "$p" ]] && SKILL_DIRS+=("${p%/}/skills"); done
 # One tool's own config: <path in the repo>:<where the tool reads it>
 TOOL_FILES=(

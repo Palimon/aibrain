@@ -1,5 +1,13 @@
 # Selected upstream skills
 
+## Anthropic web application testing
+
+Source: [anthropics/skills, `skills/webapp-testing`](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing), commit `dbd4588f9e1033efb41dad4bef2f7947c8993d44`, retrieved 2026-10-27. The complete folder is copied unchanged, including `scripts/with_server.py`, the three Python examples and [its Apache 2.0 license](webapp-testing/LICENSE.txt). It has no skill dependencies. Browser automation needs Python Playwright and its Chromium browser in the environment running the test. The server helper itself uses only Python's standard library.
+
+Bootstrap links the folder into every configured skill directory, including existing Hermes profiles. To update, compare this folder with a reviewed upstream revision, replace the complete folder, update this revision and the third-party notice, then follow the commit, test, push and bootstrap procedure below.
+
+## Matt Pocock engineering and productivity skills
+
 Source: [mattpocock/skills](https://github.com/mattpocock/skills), commit [`5beb35b040e3de97e54fa9e386d7e42d15c295c2`](https://github.com/mattpocock/skills/tree/5beb35b040e3de97e54fa9e386d7e42d15c295c2), retrieved 2026-10-26. These are editable copies under the MIT license in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## Selection and dependencies

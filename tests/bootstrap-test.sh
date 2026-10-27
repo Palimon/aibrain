@@ -69,7 +69,7 @@ mkfixture
 mkhome() { # an Omarchy-like home: tool stubs' skill links, default .bashrc, mise installs shared read-only
   H="$ROOT/$1"; rm -rf "$H"; mkdir -p "$H/.local/share/mise/installs" "$H/.config"
   for t in claude gh; do ln -s "$REAL_MISE/installs/$t" "$H/.local/share/mise/installs/$t"; done
-  for d in .agents/skills .claude/skills .codex/skills .pi/agent/skills .hermes/skills; do
+  for d in .agents/skills .claude/skills .codex/skills .grok/skills .pi/agent/skills .hermes/skills; do
     mkdir -p "$H/$d"
     for s in omarchy diagnose-crash; do ln -s "/usr/share/omarchy/default/agents/skills/$s" "$H/$d/$s"; done
   done
@@ -77,6 +77,8 @@ mkhome() { # an Omarchy-like home: tool stubs' skill links, default .bashrc, mis
   # Migrate a previous manual installation to the repo-managed folder link.
   mkdir -p "$H/.codex/skills/handoff"
   printf '%s\n' 'Previous manual handoff installation.' > "$H/.codex/skills/handoff/SKILL.md"
+  mkdir -p "$H/.grok/skills/webapp-testing" "$H/.hermes/profiles/fixture"
+  printf '%s\n' 'Previous manual webapp-testing installation.' > "$H/.grok/skills/webapp-testing/SKILL.md"
   mkdir -p "$H/.config/hypr" "$H/.ssh"   # files of the user's own that the script adds to
   printf '%s\n' '-- Keep only your personal keybinding overrides here.' '' 'o.bind("SUPER + SHIFT + R", "SSH", "alacritty -e ssh x")' > "$H/.config/hypr/bindings.lua"
   printf '%s\n' 'Host old-box' '    HostName 192.0.2.7' > "$H/.ssh/config"
@@ -109,7 +111,7 @@ snap() {
   echo "setup: $(cat "$H/.config/aibrain/setup" 2>/dev/null || echo unsaved)"
   echo "projects: $(cd "$H/Projects" 2>/dev/null && ls | tr '\n' ' ')"
   echo "trusted by Claude: $(jq -r '(.projects // {}) | to_entries[] | select(.value.hasTrustDialogAccepted == true) | .key' "$H/.claude.json" 2>/dev/null | sed "s#$H#~#" | sort | tr '\n' ' ')"
-  for d in .claude .claude/skills .claude/agents .agents/skills .codex .codex/skills .grok .pi/agent/skills .hermes/skills .local/bin; do
+  for d in .claude .claude/skills .claude/agents .agents/skills .codex .codex/skills .grok .grok/skills .pi/agent/skills .hermes/skills .hermes/profiles/fixture/skills .local/bin; do
     find "$H/$d" -mindepth 1 -maxdepth 1 \( -type l -o -name '*.json' -o -name '*.md' -o -name .git \) -printf "$d/%f -> %l\n" 2>/dev/null | sort
   done | sed "s#$H#~#g"
   local A="$H/Projects/aibrain" P="$H/Projects/aibrain-personal"
@@ -161,7 +163,7 @@ for root in (home / 'Projects/aibrain', home / 'Projects/aibrain-personal'):
         if folder.is_dir():
             assert (folder / 'SKILL.md').is_file(), folder
             skills[folder.name] = folder
-destinations = [home / p for p in ('.agents/skills', '.claude/skills', '.codex/skills',
+destinations = [home / p for p in ('.agents/skills', '.claude/skills', '.codex/skills', '.grok/skills',
                                   '.pi/agent/skills', '.hermes/skills')]
 destinations += list((home / '.hermes/profiles').glob('*/skills'))
 for dest in destinations:
@@ -262,7 +264,7 @@ usnap() { # the container's state: the user's files and links, and the system's 
     stat -c "%a %n" .config/op .config/op/aiagent-token .ssh .ssh/aibrain_fleet 2>/dev/null
     echo "computer: $(cat .config/aibrain/computer 2>/dev/null || echo unsaved)"
     echo "hypr bindings: $(test -e .config/hypr/bindings.lua && echo present || echo none)"
-    for d in .claude .claude/skills .claude/agents .agents/skills .codex .codex/skills .local/bin; do
+    for d in .claude .claude/skills .claude/agents .agents/skills .codex .codex/skills .grok .grok/skills .local/bin; do
       find "$d" -mindepth 1 -maxdepth 1 -type l -printf "$d/%f -> %l\n" 2>/dev/null | sort
     done
     echo "aibrain: $(git -C Projects/aibrain rev-parse --short HEAD) dirty=[$(git -C Projects/aibrain status --porcelain | tr "\n" " ")]"
