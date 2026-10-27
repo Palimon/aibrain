@@ -2,9 +2,9 @@
 
 These skills come from other projects, under the MIT License. Their notices are below, as that license requires.
 
-## skills/grilling, skills/grill-me, skills/grill-with-docs and skills/domain-modeling
+## Selected skills from mattpocock/skills
 
-From [mattpocock/skills](https://github.com/mattpocock/skills) (`skills/productivity/grilling` and `skills/productivity/grill-me` as of 2026-10-07, `skills/engineering/grill-with-docs` and `skills/engineering/domain-modeling` as of 2026-10-16). Changed since: `grill-me` and `grill-with-docs` say how to load a skill in Codex as well as Claude Code, and `domain-modeling` writes "architecture decision record" in full and keeps the records in `docs/decisions/`, with its format file renamed to `DECISION-RECORD-FORMAT.md`. `grill-with-docs` runs `grilling` and `domain-modeling`, so the three go together.
+From [mattpocock/skills](https://github.com/mattpocock/skills), revision `5beb35b040e3de97e54fa9e386d7e42d15c295c2`, retrieved 2026-10-26. Covers `grill-with-docs`, `improve-codebase-architecture`, `to-spec`, `implement`, `retro`, `grill-me`, `handoff`, `grilling`, `domain-modeling`, `codebase-design`, `tdd`, `code-review`, `writing-for-agents` and `setup-matt-pocock-skills`, including the reference files and `agents/openai.yaml` in each folder. See [skills/UPSTREAM.md](skills/UPSTREAM.md) for original paths and local adaptations.
 
 > Copyright (c) 2026 Matt Pocock
 

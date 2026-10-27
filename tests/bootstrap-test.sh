@@ -54,6 +54,10 @@ mkfixture() { # a personal layer repo: personal.example as committed, with test 
   printf '%s\n' 're:\bxyzzy-fixture-term\b' >> "$FIXTURE/privacy/denylist"
   mkdir -p "$FIXTURE/skills/fixture-skill"
   printf '%s\n' '---' 'name: fixture-skill' 'description: A personal skill.' '---' > "$FIXTURE/skills/fixture-skill/SKILL.md"
+  # A personal copy must win over the newly vendored handoff skill, including its support files.
+  mkdir -p "$FIXTURE/skills/handoff"
+  printf '%s\n' '---' 'name: handoff' 'description: A personal handoff override.' '---' > "$FIXTURE/skills/handoff/SKILL.md"
+  printf '%s\n' 'Reference for the personal handoff override.' > "$FIXTURE/skills/handoff/REFERENCE.md"
   mkdir -p "$FIXTURE/claude/agents"
   printf '%s\n' '---' 'name: fixture-agent' 'description: A personal agent.' '---' > "$FIXTURE/claude/agents/fixture-agent.md"
   git -C "$FIXTURE" init -q -b main && git -C "$FIXTURE" add -A &&
@@ -70,6 +74,9 @@ mkhome() { # an Omarchy-like home: tool stubs' skill links, default .bashrc, mis
     for s in omarchy diagnose-crash; do ln -s "/usr/share/omarchy/default/agents/skills/$s" "$H/$d/$s"; done
   done
   cp /etc/skel/.bashrc "$H/.bashrc"
+  # Migrate a previous manual installation to the repo-managed folder link.
+  mkdir -p "$H/.codex/skills/handoff"
+  printf '%s\n' 'Previous manual handoff installation.' > "$H/.codex/skills/handoff/SKILL.md"
   mkdir -p "$H/.config/hypr" "$H/.ssh"   # files of the user's own that the script adds to
   printf '%s\n' '-- Keep only your personal keybinding overrides here.' '' 'o.bind("SUPER + SHIFT + R", "SSH", "alacritty -e ssh x")' > "$H/.config/hypr/bindings.lua"
   printf '%s\n' 'Host old-box' '    HostName 192.0.2.7' > "$H/.ssh/config"
@@ -142,6 +149,33 @@ check_twice() {
     echo "AGENTS_LINKED: yes"
   else
     echo "AGENTS_LINKED: NO"
+  fi
+  # Check every skill folder and its reference files, including personal overrides.
+  if python3 - "$H" <<'PY'
+from pathlib import Path
+import sys
+home = Path(sys.argv[1])
+skills = {}
+for root in (home / 'Projects/aibrain', home / 'Projects/aibrain-personal'):
+    for folder in (root / 'skills').glob('*/'):
+        if folder.is_dir():
+            assert (folder / 'SKILL.md').is_file(), folder
+            skills[folder.name] = folder
+destinations = [home / p for p in ('.agents/skills', '.claude/skills', '.codex/skills',
+                                  '.pi/agent/skills', '.hermes/skills')]
+destinations += list((home / '.hermes/profiles').glob('*/skills'))
+for dest in destinations:
+    for name, source in skills.items():
+        linked = dest / name
+        assert linked.is_symlink() and linked.resolve() == source.resolve(), linked
+        for reference in source.rglob('*'):
+            if reference.is_file():
+                assert (linked / reference.relative_to(source)).is_file(), reference
+PY
+  then
+    echo "SKILLS_LINKED: yes"
+  else
+    echo "SKILLS_LINKED: NO"; rc=1
   fi
   # The personal layer is linked and the privacy guard is on, and the committed files pass it
   if grep -qx '.claude/CLAUDE.md -> ~/Projects/aibrain-personal/AGENTS.md' "$H.snap2" &&

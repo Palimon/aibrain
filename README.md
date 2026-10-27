@@ -137,6 +137,12 @@ To check by hand: `python3 -I privacy/scan.py tree` for the files, `python3 -I p
 
 Because these are links, editing a file in either place changes the same file. When a tool saves its own settings, the change shows in `git status` here. Commit it if every computer should get it, except model and effort picks (see [Model and effort](#model-and-effort)).
 
+### Selected upstream skills
+
+The selected engineering and productivity skills from `mattpocock/skills` are committed under `skills/`, with their dependencies, reference files and Codex picker metadata. Bootstrap links the complete folders into each tool's skill directory, including on an existing installation. There is no upstream plugin or automatic update to install.
+
+See [skills/UPSTREAM.md](skills/UPSTREAM.md) for the pinned source revision, dependency list, local changes, update procedure and per-project configuration needed before using the issue-tracker skills. The copyright and MIT license are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Model and effort
 
 Every new Claude Code session starts on Opus at medium effort. That default lives in `claude/managed-settings.json`, which the script copies to `/etc/claude-code/managed-settings.json`. Claude Code ranks managed settings above everything its pickers save.
