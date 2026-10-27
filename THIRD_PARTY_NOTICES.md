@@ -4,7 +4,7 @@ These skills come from other projects, under the MIT License. Their notices are 
 
 ## Selected skills from mattpocock/skills
 
-From [mattpocock/skills](https://github.com/mattpocock/skills), revision `5beb35b040e3de97e54fa9e386d7e42d15c295c2`, retrieved 2026-10-26. Covers `grill-with-docs`, `improve-codebase-architecture`, `to-spec`, `implement`, `retro`, `grill-me`, `handoff`, `grilling`, `domain-modeling`, `codebase-design`, `tdd`, `code-review`, `writing-for-agents` and `setup-matt-pocock-skills`, including the reference files and `agents/openai.yaml` in each folder. See [skills/UPSTREAM.md](skills/UPSTREAM.md) for original paths and local adaptations.
+From [mattpocock/skills](https://github.com/mattpocock/skills), revision `5beb35b040e3de97e54fa9e386d7e42d15c295c2`, retrieved 2026-10-26. Covers `grill-with-docs`, `improve-codebase-architecture`, `to-spec`, `implement`, `retro`, `grill-me`, `handoff`, `grilling`, `domain-modeling`, `codebase-design`, `tdd`, `code-review`, `writing-for-agents`, `setup-matt-pocock-skills` and `triage`, including the reference files and `agents/openai.yaml` in each folder. See [skills/UPSTREAM.md](skills/UPSTREAM.md) for original paths and local adaptations.
 
 > Copyright (c) 2026 Matt Pocock
 

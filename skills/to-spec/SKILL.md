@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.
 
-Use the project's documented issue tracker. If none is configured, tell the user to run `/setup-matt-pocock-skills`. Label configuration is optional.
+Read the project's issue-tracker configuration and triage-label mapping. If tracker configuration is missing, or the `ready-for-agent` mapping is missing and labels have not explicitly been disabled, tell the user to run `/setup-matt-pocock-skills`.
 
 ## Process
 
@@ -16,7 +16,7 @@ Use the project's documented issue tracker. If none is configured, tell the user
 
 Check with the user that these seams match their expectations.
 
-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the configured `ready-for-agent` label only when the project's workflow enables it. If labels or triage are disabled, or no label is configured, publish without labels.
+3. Write the spec using the template below, then publish it to the project issue tracker. Apply the project's mapped `ready-for-agent` label; no additional triage is needed for a finished spec. Publish without labels only when the project explicitly disables them.
 
 <spec-template>
 

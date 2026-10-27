@@ -288,6 +288,7 @@ if [[ "${1:-}" != ubuntu* && "${1:-}" != all ]]; then
 fi
 if [[ "${1:-}" == all ]]; then
   HOST_BEFORE="$(host_state)"; rc=0
+  echo "######## labels"; python3 -I "$SRC/tests/labels-test.py" || rc=1
   for s in fresh bashrc-migrate no-personal migrate projects-junk full unknown-key-binding picks computers worktrees ubuntu ubuntu-claude; do
     echo "######## $s"; "$0" "$s" || rc=1
   done

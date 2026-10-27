@@ -586,6 +586,14 @@ if [[ "$setup" == full ]]; then
   fi
 fi
 
+# --- Issue labels are per-project opt-ins. Keep configured GitHub labels current on light and full
+# setups, including after a reinstall. Local test remotes and projects without a manifest are skipped.
+for project in "$HOME"/Projects/*/; do
+  [[ -f "$project/docs/agents/labels.json" ]] || continue
+  python3 -I "$AIBRAIN/bin/aibrain-labels" "$project" ||
+    warn "Couldn't synchronize the configured labels for $(basename "$project"). Check GitHub Issues write access."
+done
+
 # --- SSH. The fleet key from 1Password is this computer's key for your servers and your other computers.
 # ~/.ssh/config starts with an Include of the personal layer's ssh/config when it has one. ssh keeps the
 # first value it finds for each setting, so those shortcuts win over anything else in the file.

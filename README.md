@@ -29,7 +29,7 @@ This works on any Omarchy computer, freshly installed or already in use, and on 
 
 1. **A vault for agents.** In 1Password, create a vault named `aiagents` and a service account with read and write access to it and nothing else (Developer > Service Accounts). Keep the service account's token in an item in your own vault, so you can copy it on each new computer.
 2. **Items the script reads**, in `aiagents`, each an API Credential item with the value in its credential field:
-   - "GitHub Agent": a fine-grained GitHub token for your account with access to all repositories (Contents, Administration, Secrets and Variables read and write). The script warns two weeks before it expires.
+   - "GitHub Agent": a fine-grained GitHub token for your account with access to all repositories (Contents, Administration, Issues, Secrets and Variables read and write). Issues write access lets bootstrap provision configured issue labels. The script warns two weeks before it expires.
    - "ssh fleet key": an SSH Key item, the key every computer uses for your servers and for each other.
    - "Tailscale auth key", optional: a Reusable key from the Tailscale admin console (Settings > Keys), so computers join your tailnet without a browser login. It lasts at most 90 days.
 3. **Your personal layer,** optional for the first run: a private repo named `aibrain-personal` on your GitHub account, with the contents of `personal.example/` filled in. Without one, the first run copies the template to `~/Projects/aibrain-personal` for you to fill in and push.
@@ -142,6 +142,8 @@ Because these are links, editing a file in either place changes the same file. W
 The selected engineering and productivity skills from `mattpocock/skills` are committed under `skills/`, with their dependencies, reference files and Codex picker metadata. Bootstrap links the complete folders into each tool's skill directory, including on an existing installation. There is no upstream plugin or automatic update to install.
 
 See [skills/UPSTREAM.md](skills/UPSTREAM.md) for the pinned source revision, dependency list, local changes, update procedure and per-project configuration needed before using the issue-tracker skills. The copyright and MIT license are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The setup skill writes each project's tracker, label and domain configuration under `docs/agents/`. On every run, bootstrap synchronizes GitHub labels for checkouts directly under `~/Projects/` that have a `docs/agents/labels.json` manifest. It creates missing labels and repairs configured colors and descriptions, while preserving unrelated labels and existing issues. Projects without a manifest and non-GitHub remotes are skipped. Run `aibrain-labels <project>` to synchronize one checkout, or add `--check` to inspect differences without writing.
 
 ## Model and effort
 

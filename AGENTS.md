@@ -18,7 +18,17 @@ These rules apply to work on this repo and on the personal layer that goes with 
 
 ## Agent skills
 
-- This repo uses no issue labels or triage. Publish specs without labels and skip label setup. No `docs/agents/triage-labels.md` is needed.
+### Issue tracker
+
+Specs and implementation tickets use GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default category and state roles. See `docs/agents/triage-labels.md`; `docs/agents/labels.json` defines their names, colors and descriptions. Bootstrap synchronizes them.
+
+### Domain docs
+
+One root glossary and architecture decision records in `docs/decisions/`, created as needed. See `docs/agents/domain.md`.
 
 ## Changing the setup
 

@@ -1,0 +1,44 @@
+[
+  {
+    "role": "bug",
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "Something isn't working"
+  },
+  {
+    "role": "enhancement",
+    "name": "enhancement",
+    "color": "a2eeef",
+    "description": "New feature or request"
+  },
+  {
+    "role": "needs-triage",
+    "name": "needs-triage",
+    "color": "ededed",
+    "description": "Maintainer needs to evaluate this issue"
+  },
+  {
+    "role": "needs-info",
+    "name": "needs-info",
+    "color": "d876e3",
+    "description": "Waiting on reporter for more information"
+  },
+  {
+    "role": "ready-for-agent",
+    "name": "ready-for-agent",
+    "color": "0e8a16",
+    "description": "Fully specified and ready for an agent to implement"
+  },
+  {
+    "role": "ready-for-human",
+    "name": "ready-for-human",
+    "color": "fbca04",
+    "description": "Requires human implementation"
+  },
+  {
+    "role": "wontfix",
+    "name": "wontfix",
+    "color": "ffffff",
+    "description": "This will not be worked on"
+  }
+]
