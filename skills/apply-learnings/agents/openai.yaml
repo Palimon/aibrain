@@ -1,0 +1,3 @@
+interface:
+  display_name: "Apply learnings"
+  short_description: "Turn agent failures into enforced fixes"

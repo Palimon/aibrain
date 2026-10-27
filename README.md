@@ -143,6 +143,8 @@ The selected engineering and productivity skills from `mattpocock/skills` are co
 
 See [skills/UPSTREAM.md](skills/UPSTREAM.md) for the pinned source revision, dependency list, local changes, update procedure and per-project configuration needed before using the issue-tracker skills. The copyright and MIT license are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+The local [`apply-learnings`](skills/apply-learnings/SKILL.md) skill turns retrospective findings and recurring agent corrections into fixes. It prefers changes to code, constraints, executable workflows, checks and blocking gates before hooks or prose. `retro` invokes it after identifying findings, respecting analysis-only requests and existing permissions. Both skills are linked into every skill directory listed above. Retro remains explicitly invoked; no stop hook runs it after every assistant reply. Loading the skills does not guarantee compliance, and the skill requires verification of each implemented check or gate.
+
 The setup skill writes each project's tracker, label and domain configuration under `docs/agents/`. On every run, bootstrap synchronizes GitHub labels for checkouts directly under `~/Projects/` that have a `docs/agents/labels.json` manifest. It creates missing labels and repairs configured colors and descriptions, while preserving unrelated labels and existing issues. Projects without a manifest and non-GitHub remotes are skipped. Run `aibrain-labels <project>` to synchronize one checkout, or add `--check` to inspect differences without writing.
 
 ## Model and effort

@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 Skill loading: use the Skill tool when available. Otherwise read and follow the named skill's `SKILL.md`, using its path in the available-skills list or `../<skill-name>/SKILL.md` relative to this folder.
 
-The user has asked for a **retrospective**. You are suggesting improvements to the coding agent's **environment** to improve future runs.
+Conduct the requested retrospective, then apply its findings to the coding agent's environment through `apply-learnings`.
 
 ## Steps
 
@@ -24,7 +24,9 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 - **No-ops**: look for instructions in steering files that don't modify the agent's behavior. _Use when_ the steering files are large and unwieldy.
 - **Information access**: look for opportunities to increase the agent's access to information. Teeing dev server logs, readonly access to third-party services. _Use when_ a crucial piece of information was not available to the agent.
 
-4. Present these candidates to the user, in order of severity.
+4. Summarize the findings in order of severity, with evidence from the session. Separate demonstrated failures from uncertain candidates.
+
+5. Load and follow `apply-learnings` to apply the findings within the current authorization. Use the Skill tool when available; otherwise read `../apply-learnings/SKILL.md`. If the user requested analysis only, preserve that scope and report proposed fixes without applying them. Finish with the changes, verification results, and unresolved findings. Do not end with suggestions when the requested fixes are authorized and can be completed.
 
 ## Reference
 
