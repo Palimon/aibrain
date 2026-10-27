@@ -16,6 +16,10 @@ These rules apply to work on this repo and on the personal layer that goes with 
 - When the scan stops a commit, remove the detail. Never bypass the hooks (`--no-verify`, `core.hooksPath`), and never loosen `privacy/scan.py`, `privacy/allow`, the hooks or the workflow to get a commit through. Changes that loosen the guard need the user's explicit OK.
 - When something new turns out to be personal, add it to the personal layer's `privacy/denylist`.
 
+## Agent skills
+
+- This repo uses no issue labels or triage. Publish specs without labels and skip label setup. No `docs/agents/triage-labels.md` is needed.
+
 ## Changing the setup
 
 - `bootstrap.sh` must bring any Omarchy machine to the same setup from any starting state, and a second run must change nothing.
