@@ -1,0 +1,11 @@
+# Watch a reserved issue
+
+Spawn one read-only subagent using Terra with low reasoning effort. On Codex's collaboration tools, use `model: "gpt-6.1-terra"`, `reasoning_effort: "low"` and `fork_turns: "none"`. Give it the explicit repository, issue number and URL, parent identity, actual reserved label name, and a stable checkout path from which authenticated `gh` works. The watcher only reads GitHub and reports to its parent. The parent owns labels and implementation.
+
+Use this brief, substituting the run's actual values:
+
+> Monitor REPOSITORY issue NUMBER, URL, for the parent PARENT. Check it immediately, then every 15 minutes while it remains blocked. Read the issue using `gh api repos/REPOSITORY/issues/NUMBER`. The readiness condition is an integer `issue_dependencies_summary.blocked_by` equal to zero, the native Relationships "Blocked by" open count. Closed dependency links do not prevent readiness. If that field is missing, use GraphQL `issueDependenciesSummary.blockedBy`; if neither can be read, report the failure and stop. Check that it remains open with RESERVED_LABEL on every poll. If the reservation disappears or the issue closes, notify the parent and stop. If the blocker count is zero, immediately notify the parent with the URL, count and observation time, then finish. While blocked, stay quiet and wait until 15 minutes after the previous check before polling again. Use supported interruptible waits in chunks of at most 60 seconds if the tool requires bounded waits. API errors are errors, not zero blockers; report them and stop. Do not edit issues, implement work, spawn agents, or message other chats.
+
+Keep the parent run active and wait for the subagent's message or completion using the runtime's supported agent wait tools. Respect tool wait limits. After notification, recheck the issue before starting implementation as described in `SKILL.md`. Do not end the parent turn with an unattended watcher and assume implementation will resume automatically.
+
+If Terra at low effort or persistent subagent waiting is unavailable, report that specific limitation and the reserved issue URL. Do not silently substitute a different model, a parent polling loop, or a scheduled job. Leave the reservation status explicit. A cancelled run stops the watcher and releases its reservation.

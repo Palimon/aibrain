@@ -476,7 +476,8 @@ if [[ "$DISTRO" != omarchy ]] && ! mise which codex >/dev/null 2>&1; then
 fi
 
 # --- Links from the agent tools into the repos. A skill, agent or script in the personal layer wins over
-# one here with the same name.
+# one here with the same name. The shared grab-issue skill is available in every project;
+# existing project-local skills remain untouched.
 say "Linking agent tools to ~/Projects/aibrain and ~/Projects/aibrain-personal"
 instructions="$PERSONAL/AGENTS.md"
 [[ -e "$instructions" ]] || instructions="$AIBRAIN/personal.example/AGENTS.md"

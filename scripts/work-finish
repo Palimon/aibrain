@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+canonical=${AIBRAIN_CANONICAL:-"$HOME/Projects/aibrain"}
+work=$(git rev-parse --show-toplevel)
+branch=$(git branch --show-current)
+[[ "$work" != "$canonical" && "$branch" == codex/* ]]
+[[ -z $(git status --porcelain) ]]
+[[ $(git -C "$canonical" branch --show-current) == main ]]
+[[ -z $(git -C "$canonical" status --porcelain) ]]
+for attempt in 1 2 3; do
+  git fetch origin main
+  expected=$(git rev-parse origin/main)
+  git rebase origin/main
+  # Bootstrap's second run fetches main. Validate an isolated main at this commit.
+  validation=$(mktemp -d)
+  trap 'rm -rf "$validation"' EXIT
+  git clone --no-local --single-branch --branch "$branch" "$work" "$validation/repo"
+  git -C "$validation/repo" branch -m main
+  (
+    cd "$validation/repo"
+    bash tests/privacy-test.sh
+    bash tests/agent-cache-test.sh
+    bash tests/session-state-test.sh
+    python3 tests/labels-test.py
+    bash tests/bootstrap-test.sh all
+  )
+  rm -rf "$validation"
+  trap - EXIT
+  [[ -z $(git -C "$canonical" status --porcelain) ]]
+  git merge-base --is-ancestor "$expected" HEAD
+  if git push --force-with-lease="refs/heads/main:$expected" origin HEAD:main; then
+    landed=$(git rev-parse HEAD)
+    git -C "$canonical" merge --ff-only "$landed"
+    git -C "$canonical" submodule update --init --recursive
+    "$canonical/bootstrap.sh"
+    [[ $(git -C "$canonical" rev-parse HEAD) == "$landed" ]]
+    [[ -z $(git -C "$canonical" status --porcelain) ]]
+    for tool in .agents .claude .codex .grok; do
+      test -f "$HOME/$tool/skills/grab-issue/SKILL.md"
+    done
+    cd "$canonical"
+    git worktree remove "$work"
+    git branch -d "$branch"
+    exit 0
+  fi
+  git fetch origin main
+  [[ $(git rev-parse origin/main) != "$expected" ]] || exit 1
+done
+echo 'Main kept advancing; worktree retained for retry.' >&2
+exit 1

@@ -24,6 +24,9 @@ manual steps.
    if applicable, verifies it, and cleans up. If `main` advances,
    rebase and validate again before retrying. Fix and rerun on failure.
 
+Setup: `scripts/work-setup <name>` from canonical `main`.
+Finish: `scripts/work-finish` from the clean task worktree.
+
 # aibrain: rules for agents
 
 These rules apply to work on this repo and on the personal layer that goes with it (`~/Projects/aibrain-personal`; README, "Your personal layer").

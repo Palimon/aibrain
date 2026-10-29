@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+canonical=${AIBRAIN_CANONICAL:-"$HOME/Projects/aibrain"}
+slug=${1:?Usage: work-setup NAME}
+[[ "$slug" =~ ^[a-z0-9][a-z0-9-]*$ ]] || exit 2
+[[ $(git -C "$canonical" branch --show-current) == main ]]
+[[ -z $(git -C "$canonical" status --porcelain) ]] || { echo 'Canonical checkout is dirty' >&2; exit 1; }
+git -C "$canonical" pull --ff-only >&2
+path="$(dirname "$canonical")/.worktrees/aibrain-$slug"
+git -C "$canonical" worktree add -b "codex/$slug" "$path" main >&2
+git -C "$path" config core.hooksPath "$canonical/.githooks"
+printf '%s\n' "$path"
