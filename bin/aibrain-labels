@@ -5,12 +5,15 @@ import argparse
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
 
 def command(args, directory):
-    result = subprocess.run(args, cwd=directory, text=True, capture_output=True)
+    # which() also finds a command that is a .cmd file on Windows, which subprocess alone doesn't
+    result = subprocess.run([shutil.which(args[0]) or args[0], *args[1:]], cwd=directory, text=True,
+                            capture_output=True)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"{args[0]} exited {result.returncode}")
     return result.stdout

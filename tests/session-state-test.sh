@@ -5,6 +5,8 @@
 set -u
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/claude/hooks/session-state.py"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+# On Windows, the C:/ form, so Python can read the paths these tests put in JSON, like the Windows paths Claude Code sends
+command -v cygpath >/dev/null && W="$(cygpath -m "$W")"
 export AIBRAIN_SESSION_STATE="$W/state" AIBRAIN_COMPACT_HARD_CAP=500000
 S=sess1; D="$W/state/$S"; TR="$W/transcript.jsonl"
 fails=0
@@ -108,9 +110,16 @@ check "injection stays under ~25k tokens" test "${#out}" -lt 100000
 
 # 12. Privacy: the state folder and its files are readable by the user only.
 reset; ev UserPromptSubmit '"prompt":"secret pasted here"' >/dev/null
-check "state folder private" test "$(stat -c %a "$W/state")" = 700
-check "session folder private" test "$(stat -c %a "$D")" = 700
-check "prompt log private" test "$(stat -c %a "$D/prompts.md")" = 600
+private() { # private <path> <mode>: only this user can read it. Windows has no modes: no access for other users.
+  if command -v icacls >/dev/null; then
+    ! icacls "$(cygpath -w "$1")" | grep -qiE 'Everyone|BUILTIN\\Users|Authenticated Users'
+  else
+    test "$(stat -c %a "$1")" = "$2"
+  fi
+}
+check "state folder private" private "$W/state" 700
+check "session folder private" private "$D" 700
+check "prompt log private" private "$D/prompts.md" 600
 
 # 13. Retention: old sessions are pruned at a new session's first prompt; recent ones stay.
 reset; mkdir -p "$W/state/old" "$W/state/recent"; echo x > "$W/state/old/prompts.md"; echo x > "$W/state/recent/prompts.md"

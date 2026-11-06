@@ -4,6 +4,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,11 +56,15 @@ class LabelProvisioning(unittest.TestCase):
         gh = stub / "gh"
         gh.write_text(FAKE_GH)
         gh.chmod(0o755)
+        path = [str(stub), os.defpath]
+        if os.name == "nt":  # Windows runs the fake through Python, and its default PATH has no git
+            (stub / "gh.cmd").write_text(f'@"{sys.executable}" "%~dp0gh" %*\n')
+            path.insert(1, os.path.dirname(shutil.which("git")))
         self.state = self.home / "state.json"
         self.state.write_text("[]")
         self.log = self.home / "calls.jsonl"
         self.env = {
-            "HOME": str(self.home), "PATH": str(stub) + os.pathsep + os.defpath,
+            "HOME": str(self.home), "PATH": os.pathsep.join(path),
             "XDG_CONFIG_HOME": str(self.home / ".config"),
             "XDG_DATA_HOME": str(self.home / ".local/share"),
             "XDG_STATE_HOME": str(self.home / ".local/state"),
@@ -69,6 +74,8 @@ class LabelProvisioning(unittest.TestCase):
             "AIBRAIN_PERSONAL_REPO": str(self.home / "personal"),
             "LABEL_TEST_STATE": str(self.state), "LABEL_TEST_LOG": str(self.log),
         }
+        # Programs on Windows need these to start at all
+        self.env.update({k: os.environ[k] for k in ("SYSTEMROOT", "PATHEXT") if k in os.environ})
         self.git("init", "-q", "-b", "main")
         self.git("remote", "add", "origin", "https://github.com/example/engine.git")
         self.wanted = [

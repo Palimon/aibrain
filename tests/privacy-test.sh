@@ -7,6 +7,8 @@
 set -u
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+# On Windows, the C:/ form, so Python can read the paths these tests put in JSON, like the Windows paths Claude Code sends
+command -v cygpath >/dev/null && W="$(cygpath -m "$W")"
 fails=0
 check() { # check <name> <condition...>
   local name="$1"; shift
@@ -104,11 +106,19 @@ check "CI output names the rule, not the text" bash -c '[[ "$1" == *"denylist en
 check "history scan passes the pushed history" bash -c 'cd "$1" && python3 -I privacy/scan.py history 2>/dev/null' _ "$R"
 
 # 6. The Claude Code hook: no skipping the hooks in ~/Projects/aibrain
-guard() { # guard <command> <cwd>: print the hook's decision
-  jq -nc --arg c "$1" --arg d "$2" '{tool_input: {command: $c}, cwd: $d}' |
+winpath() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '%s' "$1"; fi; }   # C:\ on Windows
+guard() { # guard <command> <cwd>: print the hook's decision, with the cwd in the form Claude Code sends
+  jq -nc --arg c "$1" --arg d "$(winpath "$2")" '{tool_input: {command: $c}, cwd: $d}' |
     python3 -I "$SRC/claude/hooks/privacy-guard.py" | jq -r '.hookSpecificOutput.permissionDecision // empty'
 }
 PUB="$HOME/Projects/aibrain"
+check "guard refuses --no-verify naming the repo by its full path" test "$(guard "git -C '$PUB' commit --no-verify -m x" "$W")" = deny
+check "guard refuses --no-verify naming the repo by its native path" test "$(guard "git -C '$(winpath "$PUB")' commit --no-verify -m x" "$W")" = deny
+check "guard refuses hooksPath through PowerShell's environment" test "$(guard "\$env:GIT_CONFIG_PARAMETERS = \"'core.hooksPath=/x'\"; git commit -m x" "$PUB")" = deny
+if [[ "$(uname -s)" == MINGW* ]]; then
+  check "guard refuses --no-verify naming the repo through USERPROFILE" test "$(guard 'git -C $env:USERPROFILE\Projects\aibrain commit --no-verify -m x' "$W")" = deny
+  check "guard refuses --no-verify in the repo in another case" test "$(guard 'git commit --no-verify -m x' "${PUB^^}")" = deny
+fi
 check "guard refuses --no-verify in the repo" test "$(guard 'git commit --no-verify -m x' "$PUB")" = deny
 check "guard refuses commit -n in the repo" test "$(guard 'git commit -anm x' "$PUB/tests")" = deny
 check "guard refuses a hooksPath override naming the repo" test "$(guard 'git -C ~/Projects/aibrain -c core.hooksPath=/dev/null push' "$W")" = deny

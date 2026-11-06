@@ -5,6 +5,8 @@
 set -u
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/claude/hooks/agent-cache.py"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+# On Windows, the C:/ form, so Python can read the paths these tests put in JSON, like the Windows paths Claude Code sends
+command -v cygpath >/dev/null && W="$(cygpath -m "$W")"
 export AIBRAIN_SESSION_STATE="$W/state"
 S=sess1; TR="$W/proj/$S.jsonl"; SUB="$W/proj/$S/subagents"
 mkdir -p "$SUB"; : > "$TR"
