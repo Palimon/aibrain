@@ -5,7 +5,7 @@
 # the real computer whatever HOME says. So this runs the last commit's bootstrap.sh on this computer, twice,
 # as the checkout's copy (AIBRAIN_RERUN, so ~/Projects/aibrain itself is left as it is). It checks that both
 # runs succeed, that the second changes nothing, and that the links, the session-state hook, Codex, the
-# ChatGPT app, the SSH server and Tailscale work.
+# ChatGPT and Claude apps, the OS agent's folder, the SSH server and Tailscale work.
 # Usage: tests/bootstrap-windows-test.sh
 set -uo pipefail
 [[ "$(uname -s)" == MINGW* ]] || { echo "This test runs on Windows, in Git Bash." >&2; exit 2; }
@@ -27,12 +27,20 @@ snap() { # what a second run must leave as it was
     cd ~ || exit 1
     sha256sum .bashrc .gitconfig .ssh/config .ssh/aibrain_fleet .ssh/aibrain_fleet.pub .ssh/authorized_keys .config/aibrain/* 2>&1
     echo "managed settings: $(cmp -s Projects/aibrain/claude/managed-settings.json "/c/Program Files/ClaudeCode/managed-settings.json" && echo installed || echo differs)"
+    codex_state
     echo "trusted by Claude: $(jq -r '(.projects // {}) | to_entries[] | select(.value.hasTrustDialogAccepted == true) | .key' .claude.json | tr -d '\r' | sort | tr '\n' ' ')"
     for d in "${LINK_DIRS[@]}"; do find "$d" -mindepth 1 -maxdepth 1 -type l -printf "$d/%f -> %l\n" 2>/dev/null | sort; done
     for r in aibrain aibrain-personal; do
       echo "$r: $(git -C "Projects/$r" rev-parse --short HEAD) dirty=[$(git -C "Projects/$r" status --porcelain | tr '\n' ' ')] stashes=$(git -C "Projects/$r" stash list | wc -l)"
     done
   )
+}
+codex_state() { # what Codex's app server says it trusts, and its projects with their folders
+  { printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"1"},"capabilities":{"experimentalApi":true}}}' \
+      '{"method":"initialized"}' '{"id":2,"method":"config/read","params":{}}' '{"id":3,"method":"project/list","params":{}}'
+    sleep 5; } | timeout 30 codex app-server 2>/dev/null | tr -d '\r' |
+    jq -r 'if .id == 2 then .result.config.projects // {} | to_entries[] | select(.value.trust_level == "trusted") | "trusted by Codex: \(.key)"
+           elif .id == 3 then .result.data[] | "Codex project: \(.name) \(.roots | map(.path) | join(" "))" else empty end' | sort
 }
 hook_ok() { # the Stop hook, run exactly as the linked settings.json wires it
   local S="$T/sessions" cmd
@@ -56,6 +64,11 @@ check "session-state hook runs" hook_ok
 # A new terminal's PATH comes from the registry, not from the runs above
 check "codex runs in a new terminal" powershell.exe -NoProfile -Command '$env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine"); codex --version | Out-Null; exit $LASTEXITCODE'
 check "the ChatGPT app is installed" powershell.exe -NoProfile -Command 'if (-not (Get-AppxPackage -Name OpenAI.Codex)) { exit 1 }'
+check "the Claude app is installed" powershell.exe -NoProfile -Command 'if (-not (Get-AppxPackage -Name Claude)) { exit 1 }'
+os_dir="$(cat ~/.config/aibrain/os-agent-dir)"
+check "the OS agent's folder has its files" test -s "$os_dir/AGENTS.md" -a -s "$os_dir/NEXT-STEPS.md"
+check "the OS agent's folder is a ChatGPT app project" grep -qxF "Codex project: OS Agent $(cygpath -w "$os_dir")" "$T/snap2"
+check "Codex trusts the OS agent's folder" grep -qxF "trusted by Codex: $(cygpath -w "$os_dir")" "$T/snap2"
 login() { # login <ssh> <ssh options>...: log in to this computer over SSH; ssh's errors on stdout
   local ssh="$1"; shift
   "$ssh" -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \

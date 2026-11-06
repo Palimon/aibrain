@@ -172,6 +172,26 @@ apt_source() { # apt_source <package>: on Ubuntu, the vendor's apt repo and sign
   fi
   [[ "$(cat "$list" 2>/dev/null)" == "$line" ]] || printf '%s\n' "$line" | sudo tee "$list" >/dev/null
 }
+codex_rpc() { # codex_rpc <request>...: send JSON-RPC requests, without ids, to `codex app-server`, the API the
+  # ChatGPT app uses, and print each result on a line. Fails on the first error.
+  local id=0 req line rc=0
+  coproc CODEX_RPC { codex app-server 2>/dev/null; }
+  for req in '{"method":"initialize","params":{"clientInfo":{"name":"aibrain","version":"1"},"capabilities":{"experimentalApi":true}}}' "$@"; do
+    jq -c --argjson id "$id" '. + {id: $id}' <<< "$req" >&"${CODEX_RPC[1]}"
+    rc=1
+    while IFS= read -r -t 60 line <&"${CODEX_RPC[0]}"; do
+      [[ "$(jq -r '.id // empty' <<< "$line")" == "$id" ]] || continue
+      jq -e 'has("result")' <<< "$line" >/dev/null && rc=0
+      ((rc || id == 0)) || jq -c .result <<< "$line"
+      break
+    done
+    ((rc == 0)) || break
+    ((id++ > 0)) || printf '%s\n' '{"method":"initialized"}' >&"${CODEX_RPC[1]}"
+  done
+  exec {CODEX_RPC[1]}>&-
+  wait "$CODEX_RPC_PID" 2>/dev/null
+  return "$rc"
+}
 pkg_add() { # pkg_add <package>...: install the packages that are missing, from the distro's repos or a vendor's
   local p missing=()
   for p in "$@"; do if pkg_missing "$p"; then missing+=("$p"); fi; done
@@ -560,7 +580,7 @@ load_config
 
 # --- Claude Code through mise, like gh, unless this computer is Codex-only (CODEX_ONLY). Then a Claude
 # Code from mise is removed, along with its managed settings below. On Windows it's Anthropic's native
-# install, in ~/.local/bin, which keeps itself up to date.
+# install, in ~/.local/bin, which keeps itself up to date, and the Claude app comes from winget.
 [[ "$DISTRO" != windows || "$CODEX_ONLY" != 1 ]] || die "CODEX_ONLY isn't supported on Windows yet."
 if [[ "$CODEX_ONLY" != 1 ]]; then
   if [[ "$DISTRO" == windows ]]; then
@@ -569,6 +589,7 @@ if [[ "$CODEX_ONLY" != 1 ]]; then
       powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'irm https://claude.ai/install.ps1 | iex' >/dev/null ||
         die "Claude Code's installer failed."
     fi
+    pkg_add Anthropic.Claude
   else
     say "Installing Claude Code"
     MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet claude
@@ -780,19 +801,21 @@ if [[ "$DISTRO" != windows ]] && { [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$ssh
 fi
 
 # --- The OS agent: Ctrl+Super+Shift+A opens Claude Code in bypass mode in the OS agent's folder, which holds
-# its memory for this computer (bin/aibrain-agent). A new folder gets a starting AGENTS.md; after that the
-# file is the agent's own.
+# its memory for this computer (bin/aibrain-agent). On Windows there's no hotkey: the folder is a project in
+# the ChatGPT app (below), and Claude's app lists it once a session has run there. A new folder gets a
+# starting AGENTS.md and NEXT-STEPS.md; after that the files are the agent's own.
 os_dir="$HOME/osagent"
 for d in "${OS_AGENT_DIRS[@]}"; do if [[ -d "$d" ]]; then os_dir="$d"; break; fi; done
 mkdir -p "$os_dir" "$(dirname "$OS_AGENT_FILE")"
 [[ "$(cat "$OS_AGENT_FILE" 2>/dev/null)" == "$os_dir" ]] || printf '%s\n' "$os_dir" > "$OS_AGENT_FILE"
-[[ -e "$os_dir/AGENTS.md" ]] || cat > "$os_dir/AGENTS.md" <<'EOF'
-# OS agent
+[[ -e "$os_dir/AGENTS.md" ]] || cat > "$os_dir/AGENTS.md" <<EOF
+# OS agent for $COMPUTER
 
-This folder is the memory of the agent that looks after this computer: its setup, hardware, problems and open work. Keep what you learn here as files, one topic per `.md`, and keep this file pointing to them. Open work goes in `NEXT-STEPS.md`.
+This folder is the memory of the agent that looks after this computer, $COMPUTER: its setup, hardware, problems and open work. Keep what you learn here as files, one topic per \`.md\`, and keep this file pointing to them. Open work goes in \`NEXT-STEPS.md\`.
 
-A fix that must outlast a reinstall goes in the personal layer, in `computers/<name>/`, as aibrain's README describes under "Computers". `~/.config/aibrain/computer` holds this computer's name; without that file, the name is the hostname.
+A fix that must outlast a reinstall goes in the personal layer, in \`computers/$COMPUTER/\`, as aibrain's README describes under "Computers".
 EOF
+[[ -e "$os_dir/NEXT-STEPS.md" ]] || printf '%s\n' "# Open work on $COMPUTER" "" "Nothing yet." > "$os_dir/NEXT-STEPS.md"
 HYPR_BINDINGS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
 if desktop; then
   hypr_block='-- >>> aibrain >>>
@@ -1023,6 +1046,29 @@ if [[ "$CODEX_ONLY" != 1 && -s "$CLAUDE_JSON" ]] &&
   claude_json_tmp="$(mktemp "$CLAUDE_JSON.XXXXXX")"
   jq 'reduce $ARGS.positional[] as $d (.; .projects[$d].hasTrustDialogAccepted = true)' --args "${trust_dirs[@]}" < "$CLAUDE_JSON" > "$claude_json_tmp"
   chmod --reference="$CLAUDE_JSON" "$claude_json_tmp" && mv "$claude_json_tmp" "$CLAUDE_JSON"
+fi
+
+# --- Codex trusts the same folders, in ~/.codex/config.toml's projects table, and the ChatGPT app gets the OS
+# agent's folder as a project, which Codex keeps in its state database. Both go through codex_rpc, so
+# neither file is edited by hand. Codex on Windows names a folder C:\Users\...
+if command -v codex >/dev/null 2>&1; then
+  codex_dirs=("${trust_dirs[@]}")
+  [[ "$DISTRO" != windows ]] || mapfile -t codex_dirs < <(cygpath -w "${codex_dirs[@]}")
+  if ! codex_state="$(codex_rpc '{"method":"config/read","params":{}}' '{"method":"project/list","params":{"limit":1000}}')"; then
+    warn "Couldn't reach codex app-server, so Codex may not trust ${codex_dirs[0]} and the repos, and the ChatGPT app may have no OS Agent project."
+  else
+    codex_trust="$(jq -sc '.[0].config.projects as $p | [$ARGS.positional[] | select((($p // {})[.] // {}).trust_level != "trusted") | {(.): {trust_level: "trusted"}}] | add // empty' --args "${codex_dirs[@]}" <<< "$codex_state")"
+    if [[ -n "$codex_trust" ]]; then
+      say "Making Codex trust the OS agent's folder and the repos in ~/Projects"
+      codex_rpc "$(jq -nc --argjson v "$codex_trust" '{method: "config/value/write", params: {keyPath: "projects", mergeStrategy: "upsert", value: $v}}')" >/dev/null ||
+        warn "Couldn't make Codex trust ${codex_dirs[*]}."
+    fi
+    if ! jq -se --arg d "${codex_dirs[0]}" '.[1].data | any(.roots[].path == $d)' <<< "$codex_state" >/dev/null; then
+      say "Adding the OS agent's folder to the ChatGPT app as a project"
+      codex_rpc "$(jq -nc --arg d "${codex_dirs[0]}" --arg k "aibrain-$(date +%s)-$RANDOM" '{method: "project/create", params: {idempotencyKey: $k, name: "OS Agent", roots: [{path: $d}]}}')" >/dev/null ||
+        warn "Couldn't add ${codex_dirs[0]} to the ChatGPT app as a project."
+    fi
+  fi
 fi
 
 # --- The privacy check that runs on GitHub (.github/workflows/privacy.yml) reads the personal denylist from
