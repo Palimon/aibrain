@@ -209,8 +209,27 @@ prune() { # prune <dir> <prefix>...: remove broken symlinks in <dir> that point 
 }
 
 # --- Passwordless sudo for this user, so agents can change the system without asking. Setting it up
-# asks for the password one last time. Windows has no equivalent: each step that changes the whole
-# computer asks you through UAC, and only in a terminal.
+# asks for the password one last time. On Windows the same comes from UAC set to never notify:
+# administrators elevate without being asked, with UAC itself still on. Setting it asks through UAC one
+# last time, and from then on win_admin needs no terminal (win_admin_ok).
+UAC_KEY='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+win_uac_quiet() {
+  [[ "$(powershell.exe -NoProfile -Command "\$k = Get-ItemProperty '$UAC_KEY'; \"\$(\$k.ConsentPromptBehaviorAdmin) \$(\$k.PromptOnSecureDesktop)\"" | tr -d '\r')" == "0 0" ]]
+}
+win_admin_ok() { have_tty || win_uac_quiet; }   # win_admin can run: someone can answer UAC, or it won't ask
+admin_ok() { # a step that changes the whole computer can run: sudo works or can ask, or on Windows, win_admin
+  if [[ "$DISTRO" == windows ]]; then win_admin_ok; else have_tty || sudo -n true 2>/dev/null; fi
+}
+if [[ "$DISTRO" == windows ]] && ! win_uac_quiet; then
+  if have_tty; then
+    say "Letting administrators elevate without being asked (UAC)"
+    win_admin "Set-ItemProperty -Path '$UAC_KEY' -Name ConsentPromptBehaviorAdmin -Value 0
+Set-ItemProperty -Path '$UAC_KEY' -Name PromptOnSecureDesktop -Value 0" && win_uac_quiet ||
+      die "Couldn't set UAC to elevate administrators without asking. This user must be an administrator."
+  else
+    warn "UAC still asks before each change to the whole computer, and setting that needs you once. Run this once in a terminal."
+  fi
+fi
 SUDOERS=/etc/sudoers.d/zz-aibrain
 SUDOERS_LINE="$USER ALL=(ALL) NOPASSWD: ALL"
 if [[ "$DISTRO" != windows && "$(sudo -n cat "$SUDOERS" 2>/dev/null)" != "$SUDOERS_LINE" ]]; then
@@ -600,17 +619,17 @@ prune "$HOME/.local/bin" "$AIBRAIN/bin" "$PERSONAL/bin" "$HOME/.claude/bin"
 # --- Claude Code's default model and effort, Opus at medium, in managed settings: the one settings file
 # its /model and /effort pickers never write to and that outranks what they save. A pick still applies
 # to its own session (README, "Model and effort"). On Windows the file is in Program Files, which only an
-# administrator may write, so changing it asks you through UAC.
+# administrator may write.
 MANAGED_SETTINGS=/etc/claude-code/managed-settings.json
 if [[ "$DISTRO" == windows ]]; then
   MANAGED_SETTINGS="/c/Program Files/ClaudeCode/managed-settings.json"
   if ! cmp -s "$AIBRAIN/claude/managed-settings.json" "$MANAGED_SETTINGS"; then
     say "Setting Claude Code's default model and effort"
-    have_tty || die "Installing $MANAGED_SETTINGS needs an administrator. Run this once in a terminal."
+    win_admin_ok || die "Installing $MANAGED_SETTINGS needs an administrator. Run this once in a terminal."
     win_admin "New-Item -ItemType Directory -Force -Path '$(cygpath -w "${MANAGED_SETTINGS%/*}")' | Out-Null
 Copy-Item -Force -LiteralPath '$(cygpath -w "$AIBRAIN/claude/managed-settings.json")' -Destination '$(cygpath -w "$MANAGED_SETTINGS")'" &&
       cmp -s "$AIBRAIN/claude/managed-settings.json" "$MANAGED_SETTINGS" ||
-      die "Couldn't install $MANAGED_SETTINGS. Accept the administrator prompt, then run this again."
+      die "Couldn't install $MANAGED_SETTINGS as administrator."
   fi
 elif [[ "$CODEX_ONLY" == 1 ]]; then
   if [[ -e "$MANAGED_SETTINGS" ]]; then
@@ -855,8 +874,8 @@ if [[ "${AIBRAIN_TEST_KEEP_TAILSCALE:-}" == 1 ]]; then
 elif [[ "$DISTRO" == windows && -n "$TS_SHARE_LAN" ]]; then
   warn "TS_SHARE_LAN isn't supported on Windows yet, so Tailscale is left as it is."
 elif pkg_missing "$TS_PKG" || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
-  if ! have_tty && ! sudo -n true 2>/dev/null; then
-    warn "Tailscale isn't fully set up, and that needs sudo (on Windows, a terminal). Run this once in a terminal."
+  if ! admin_ok; then
+    warn "Tailscale isn't fully set up, and that needs sudo or an administrator. Run this once in a terminal."
   else
     say "Setting up Tailscale"
     pkg_add "$TS_PKG"   # on Windows its installer asks you through UAC
@@ -947,7 +966,7 @@ if [[ "$DISTRO" == windows ]]; then
   elif ! ts_up; then
     warn "The SSH server isn't set up, since it waits for Tailscale, whose adapter its firewall rule names."
   elif ! win_sshd_ok; then
-    if ! have_tty; then
+    if ! win_admin_ok; then
       warn "The SSH server isn't fully set up, and that needs an administrator. Run this once in a terminal."
     else
       say "Setting up the SSH server"
