@@ -729,8 +729,9 @@ done
 # first value it finds for each setting, so those shortcuts win over anything else in the file.
 SSH_KEY="$HOME/.ssh/aibrain_fleet"
 mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-if ssh_key="$(op read "$SSH_KEY_ITEM/private key?ssh-format=openssh" 2>/dev/null)" && [[ -n "$ssh_key" ]] &&
-   ssh_pub="$(op read "$SSH_KEY_ITEM/public key" 2>/dev/null)"; then
+# (On Windows op writes the key's lines with CRLF, which Git Bash's OpenSSH can't read: tr takes the CRs out.)
+if ssh_key="$(op read "$SSH_KEY_ITEM/private key?ssh-format=openssh" 2>/dev/null | tr -d '\r')" && [[ -n "$ssh_key" ]] &&
+   ssh_pub="$(op read "$SSH_KEY_ITEM/public key" 2>/dev/null | tr -d '\r')"; then
   [[ "$(cat "$SSH_KEY" 2>/dev/null)" == "$ssh_key" ]] || (umask 077; printf '%s\n' "$ssh_key" > "$SSH_KEY")
   chmod 600 "$SSH_KEY"
   [[ "$(cat "$SSH_KEY.pub" 2>/dev/null)" == "$ssh_pub ssh fleet key" ]] || printf '%s ssh fleet key\n' "$ssh_pub" > "$SSH_KEY.pub"
@@ -947,7 +948,8 @@ fi
 WIN_SSH_ADAPTER=Tailscale
 WIN_SSH_RULE="Managed by ~/Projects/aibrain/bootstrap.sh: SSH through the $WIN_SSH_ADAPTER adapter only"
 win_ssh_login() { # win_ssh_login <ssh options>...: log in to this computer and run true; ssh's errors on stdout
-  ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  # Git Bash's ssh, the one agents use, which is stricter about keys than Windows' own
+  /usr/bin/ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o LogLevel=ERROR "$@" "$USER@localhost" true 2>&1
 }
 win_sshd_ok() {

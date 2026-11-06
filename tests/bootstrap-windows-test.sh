@@ -53,12 +53,16 @@ check "links are real and resolve" bash -c 'cd ~ && [[ -L .claude/settings.json 
 check "grab-issue skill linked for every tool" bash -c 'for d in .agents .claude .codex .grok; do test -f ~/$d/skills/grab-issue/SKILL.md || exit 1; done'
 check "the checkout's own links are links" test -L "$HOME/Projects/aibrain/.claude/skills/webapp-testing"
 check "session-state hook runs" hook_ok
-login() { # login <ssh options>...: log in to this computer over SSH; ssh's errors on stdout
-  ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+login() { # login <ssh> <ssh options>...: log in to this computer over SSH; ssh's errors on stdout
+  local ssh="$1"; shift
+  "$ssh" -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o LogLevel=ERROR "$@" "${USER:-$USERNAME}@localhost" true 2>&1
 }
-check "the SSH server takes the fleet key" login -i "$HOME/.ssh/aibrain_fleet" -o IdentitiesOnly=yes
-check "the SSH server takes no passwords" bash -c '[[ "$1" == *"Permission denied (publickey)"* ]]' _ "$(login -o PubkeyAuthentication=no)"
+# Both clients: Git Bash's, which agents use, and Windows' own, which reads keys more leniently
+for c in /usr/bin/ssh /c/Windows/System32/OpenSSH/ssh.exe; do
+  check "the SSH server takes the fleet key from $c" login "$c" -i "$HOME/.ssh/aibrain_fleet" -o IdentitiesOnly=yes
+done
+check "the SSH server takes no passwords" bash -c '[[ "$1" == *"Permission denied (publickey)"* ]]' _ "$(login /usr/bin/ssh -o PubkeyAuthentication=no)"
 check "on the tailnet" bash -c '[[ "$("/c/Program Files/Tailscale/tailscale.exe" status --json | jq -r .BackendState | tr -d "\r")" == Running ]]'
 
 echo
