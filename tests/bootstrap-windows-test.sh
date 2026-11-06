@@ -4,8 +4,8 @@
 # A throwaway home can't work on Windows, because winget, Program Files and Claude Code's installer act on
 # the real computer whatever HOME says. So this runs the last commit's bootstrap.sh on this computer, twice,
 # as the checkout's copy (AIBRAIN_RERUN, so ~/Projects/aibrain itself is left as it is). It checks that both
-# runs succeed, that the second changes nothing, and that the links, the session-state hook, the SSH server
-# and Tailscale work.
+# runs succeed, that the second changes nothing, and that the links, the session-state hook, Codex, the
+# ChatGPT app, the SSH server and Tailscale work.
 # Usage: tests/bootstrap-windows-test.sh
 set -uo pipefail
 [[ "$(uname -s)" == MINGW* ]] || { echo "This test runs on Windows, in Git Bash." >&2; exit 2; }
@@ -53,6 +53,9 @@ check "links are real and resolve" bash -c 'cd ~ && [[ -L .claude/settings.json 
 check "grab-issue skill linked for every tool" bash -c 'for d in .agents .claude .codex .grok; do test -f ~/$d/skills/grab-issue/SKILL.md || exit 1; done'
 check "the checkout's own links are links" test -L "$HOME/Projects/aibrain/.claude/skills/webapp-testing"
 check "session-state hook runs" hook_ok
+# A new terminal's PATH comes from the registry, not from the runs above
+check "codex runs in a new terminal" powershell.exe -NoProfile -Command '$env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine"); codex --version | Out-Null; exit $LASTEXITCODE'
+check "the ChatGPT app is installed" powershell.exe -NoProfile -Command 'if (-not (Get-AppxPackage -Name OpenAI.Codex)) { exit 1 }'
 login() { # login <ssh> <ssh options>...: log in to this computer over SSH; ssh's errors on stdout
   local ssh="$1"; shift
   "$ssh" -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
