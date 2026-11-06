@@ -951,12 +951,13 @@ win_ssh_login() { # win_ssh_login <ssh options>...: log in to this computer and 
     -o LogLevel=ERROR "$@" "$USER@localhost" true 2>&1
 }
 win_sshd_ok() {
-  [[ "$(powershell.exe -NoProfile -Command '
+  local want="Running Automatic|True $WIN_SSH_RULE|" got   # then Windows' own rule: turned off, or not there
+  got="$(powershell.exe -NoProfile -Command '
     $s = Get-Service sshd -ErrorAction SilentlyContinue
     $r = Get-NetFirewallRule -Name aibrain-sshd -ErrorAction SilentlyContinue
     $d = Get-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue
-    "$($s.Status) $($s.StartType)|$($r.Enabled) $($r.Description)|$($d.Enabled)"' | tr -d '\r')" == \
-     "Running Automatic|True $WIN_SSH_RULE|"?(False) ]] &&
+    "$($s.Status) $($s.StartType)|$($r.Enabled) $($r.Description)|$($d.Enabled)"' | tr -d '\r')"
+  [[ "$got" == "$want" || "$got" == "${want}False" ]] &&
     win_ssh_login -i "$SSH_KEY" -o IdentitiesOnly=yes >/dev/null &&
     [[ "$(win_ssh_login -o PubkeyAuthentication=no)" == *"Permission denied (publickey)"* ]]
 }
