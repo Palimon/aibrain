@@ -983,8 +983,8 @@ if (\$new -ne \$text) { [IO.File]::WriteAllText(\$conf, \$new) }
 \$keys = \"\$dir\\administrators_authorized_keys\"; \$line = '$ssh_pub ssh fleet key'
 if (-not (Test-Path \$keys) -or -not (@(Get-Content \$keys) -contains \$line)) { Add-Content -Encoding ascii -LiteralPath \$keys -Value \$line }
 icacls.exe \$keys /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null
-New-Item -Force -Path HKLM:\\SOFTWARE\\OpenSSH | Out-Null
-New-ItemProperty -Force -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -PropertyType String -Value '$(cygpath -w /)\\bin\\bash.exe' | Out-Null
+if (-not (Test-Path HKLM:\\SOFTWARE\\OpenSSH)) { New-Item -Path HKLM:\\SOFTWARE\\OpenSSH | Out-Null }   # the feature makes it, locked down
+Set-ItemProperty -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -Type String -Value '$(cygpath -w /)\\bin\\bash.exe'
 Set-Service sshd -StartupType Automatic
 Restart-Service sshd
 Disable-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue
