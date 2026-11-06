@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-canonical=${AIBRAIN_CANONICAL:-"$HOME/Projects/aibrain"}
-work=$(git rev-parse --show-toplevel)
+canonical=$(cd "${AIBRAIN_CANONICAL:-"$HOME/Projects/aibrain"}" && pwd)
+# Through cd and pwd, so both paths take one form: on Windows git says C:/..., where Git Bash says /c/...
+work=$(cd "$(git rev-parse --show-toplevel)" && pwd)
 branch=$(git branch --show-current)
-[[ "$work" != "$canonical" && "$branch" == codex/* ]]
-[[ -z $(git status --porcelain) ]]
-[[ $(git -C "$canonical" branch --show-current) == main ]]
-[[ -z $(git -C "$canonical" status --porcelain) ]]
+[[ "$work" != "$canonical" && "$branch" == codex/* ]] || { echo 'Run this from a codex/* worktree' >&2; exit 1; }
+[[ -z $(git status --porcelain) ]] || { echo 'Worktree is dirty' >&2; exit 1; }
+[[ $(git -C "$canonical" branch --show-current) == main ]] || { echo 'Canonical checkout is not on main' >&2; exit 1; }
+[[ -z $(git -C "$canonical" status --porcelain) ]] || { echo 'Canonical checkout is dirty' >&2; exit 1; }
 for attempt in 1 2 3; do
   git fetch origin main
   expected=$(git rev-parse origin/main)
