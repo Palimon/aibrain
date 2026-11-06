@@ -141,11 +141,16 @@ win_path() { # Windows: put the folders installers added to the registry's PATH 
     tr -d '\r' | tr ';' '\n' | while IFS= read -r d; do [[ -n "$d" ]] && cygpath -u "$d"; done)
   PATH="$new$PATH"
 }
-win_admin() { # win_admin <powershell command>: on Windows, run it as administrator, after Windows asks you (UAC)
-  local ps; ps="$(mktemp --suffix=.ps1)"
-  printf '%s\n' '$ErrorActionPreference = "Stop"' "$1" > "$ps"
+win_admin() { # win_admin <powershell commands>: on Windows, run them as administrator, after Windows asks you (UAC)
+  # They run in a window of their own, which closes at the end, so an error is kept in a file and shown here.
+  local ps log rc
+  ps="$(mktemp --suffix=.ps1)" log="$(mktemp)"
+  printf '%s\n' '$ErrorActionPreference = "Stop"' 'try {' "$1" '} catch {' \
+    "  \$_ | Out-String | Set-Content -LiteralPath '$(cygpath -w "$log")'; exit 1" '}' > "$ps"
   powershell.exe -NoProfile -Command "\$p = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$(cygpath -w "$ps")'; exit \$p.ExitCode"
-  local rc=$?; rm -f "$ps"; return $rc
+  rc=$?
+  [[ ! -s "$log" ]] || warn "As administrator: $(tr -d '\r' < "$log" | sed '/^\s*$/d')"
+  rm -f "$ps" "$log"; return $rc
 }
 apt_source() { # apt_source <package>: on Ubuntu, the vendor's apt repo and signing key for a package Ubuntu doesn't carry
   local arch key url keyring list line raw
@@ -737,9 +742,7 @@ PermitRootLogin no'
 if [[ "$DISTRO" == omarchy ]]; then SSH_UNITS=(sshd.service); else SSH_UNITS=(ssh.service ssh.socket); fi
 ssh_running() { local u; for u in "${SSH_UNITS[@]}"; do systemctl is-enabled --quiet "$u" && systemctl is-active --quiet "$u" && return 0; done; return 1; }
 if [[ "$DISTRO" == ubuntu ]] && pkg_missing openssh-server; then pkg_add openssh-server; fi
-if [[ "$DISTRO" == windows ]]; then
-  warn "The SSH server isn't set up on Windows yet, so your other computers can't log in here."
-elif [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]] || ! ssh_running; then
+if [[ "$DISTRO" != windows ]] && { [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]] || ! ssh_running; }; then
   if ! have_tty && ! sudo -n true 2>/dev/null; then
     warn "The SSH server isn't set up, and that needs sudo. Run this once in a terminal."
   else
@@ -813,45 +816,74 @@ fi
 # LAN that another computer shares, and accepted, that LAN's route would send its own LAN traffic,
 # replies included, into the tailnet. It doesn't accept them even while it first joins. On Ubuntu the package comes from Tailscale's apt repo. Without a desktop, Taildrop
 # receiving, the bar widget and the web app are left out.
+# On Windows it's Tailscale's own app from winget, whose service needs no sudo and has no operator. It
+# joins unattended instead, so it stays up while nobody is signed in to Windows, as tailscaled does
+# elsewhere, and Taildrop comes with the app. Sharing a LAN (TS_SHARE_LAN) isn't supported there yet.
 TS_SYSCTL=/etc/sysctl.d/99-aibrain-tailscale.conf
-ts_up() { [[ "$(tailscale status --json 2>/dev/null | jq -r '.BackendState // empty')" == Running ]]; }
+TS_PKG=tailscale TS_ADMIN=(sudo) TS_OWNER=(--operator="$USER") TS_OWNER_PREF='.OperatorUser' TS_OWNER_WANT="$USER"
+if [[ "$DISTRO" == windows ]]; then
+  TS_PKG=Tailscale.Tailscale TS_ADMIN=() TS_OWNER=(--unattended) TS_OWNER_PREF='.ForceDaemon' TS_OWNER_WANT=true
+  PATH="/c/Program Files/Tailscale:$PATH"
+fi
+ts_up() { [[ "$(tailscale status --json 2>/dev/null | jq -r '.BackendState // empty' | tr -d '\r')" == Running ]]; }
 ts_prefs() { tailscale debug prefs 2>/dev/null || true; }
 ts_accept() { if [[ -n "$TS_SHARE_LAN" || "$TS_ACCEPT_ROUTES" == 0 ]]; then echo false; else echo true; fi; }
 ts_prefs_ok() {
-  [[ "$(ts_prefs | jq -r '[.OperatorUser, .RouteAll, ((.AdvertiseRoutes // []) | join(","))] | map(tostring) | join("|")')" == "$USER|$(ts_accept)|$TS_SHARE_LAN" ]]
+  [[ "$(ts_prefs | jq -r "[$TS_OWNER_PREF, .RouteAll, ((.AdvertiseRoutes // []) | join(\",\"))] | map(tostring) | join(\"|\")" | tr -d '\r')" == "$TS_OWNER_WANT|$(ts_accept)|$TS_SHARE_LAN" ]]
 }
 ts_sysctl() { printf '# Managed by ~/Projects/aibrain/bootstrap.sh: this machine routes %s onto the tailnet.\nnet.ipv4.ip_forward = 1\n' "$1"; }
 ts_fwd_ok() { # forwarding on for a subnet router, and no forwarding file of ours anywhere else
   local lan="$TS_SHARE_LAN"
+  [[ "$DISTRO" != windows ]] || return 0
   if [[ -n "$lan" ]]; then
     [[ "$(cat "$TS_SYSCTL" 2>/dev/null)" == "$(ts_sysctl "$lan")" && "$(sysctl -n net.ipv4.ip_forward)" == 1 ]]
   else
     [[ ! -e "$TS_SYSCTL" ]]
   fi
 }
-tsd_running() { systemctl is-enabled --quiet tailscaled.service && systemctl is-active --quiet tailscaled.service; }
+tsd_running() {
+  if [[ "$DISTRO" == windows ]]; then
+    [[ "$(powershell.exe -NoProfile -Command '$s = Get-Service Tailscale -ErrorAction SilentlyContinue; "$($s.Status) $($s.StartType)"' | tr -d '\r')" == "Running Automatic" ]]
+  else
+    systemctl is-enabled --quiet tailscaled.service && systemctl is-active --quiet tailscaled.service
+  fi
+}
 # AIBRAIN_TEST_KEEP_TAILSCALE=1 leaves the system's Tailscale alone. The tests set it on their host, which
 # they run as another computer, so its settings would change the host's.
 if [[ "${AIBRAIN_TEST_KEEP_TAILSCALE:-}" == 1 ]]; then
   :
-elif [[ "$DISTRO" == windows ]]; then
-  warn "Tailscale isn't set up on Windows yet, so this computer isn't on your tailnet."
-elif pkg_missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
+elif [[ "$DISTRO" == windows && -n "$TS_SHARE_LAN" ]]; then
+  warn "TS_SHARE_LAN isn't supported on Windows yet, so Tailscale is left as it is."
+elif pkg_missing "$TS_PKG" || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
   if ! have_tty && ! sudo -n true 2>/dev/null; then
-    warn "Tailscale isn't fully set up, and that needs sudo. Run this once in a terminal."
+    warn "Tailscale isn't fully set up, and that needs sudo (on Windows, a terminal). Run this once in a terminal."
   else
     say "Setting up Tailscale"
-    pkg_add tailscale
-    tsd_running || sudo systemctl enable --now tailscaled.service
+    pkg_add "$TS_PKG"   # on Windows its installer asks you through UAC
+    if ! tsd_running; then
+      if [[ "$DISTRO" == windows ]]; then
+        win_admin "Set-Service Tailscale -StartupType Automatic; Start-Service Tailscale" ||
+          warn "Couldn't start the Tailscale service."
+      else
+        sudo systemctl enable --now tailscaled.service
+      fi
+    fi
     if ! ts_up; then
       # --reset so joining leaves exactly these settings, whatever an earlier setup left behind
-      up=(sudo tailscale up --reset --accept-routes="$(ts_accept)" --operator="$USER")
+      up=("${TS_ADMIN[@]}" tailscale up --reset --accept-routes="$(ts_accept)" "${TS_OWNER[@]}")
       # --reset also drops a machine name given with --hostname. Keep it; a first join uses this
       # computer's name, so after a reinstall the tailnet knows it by its old name again.
-      ts_host="$(ts_prefs | jq -r '.Hostname // empty')"
+      ts_host="$(ts_prefs | jq -r '.Hostname // empty' | tr -d '\r')"
       up+=(--hostname="${ts_host:-$COMPUTER}")
       if op item get "$TS_KEY_ITEM" --vault "$OP_VAULT" >/dev/null 2>&1; then
-        op read "op://$OP_VAULT/$TS_KEY_ITEM/credential" | "${up[@]}" --auth-key=file:/dev/stdin --timeout=60s ||
+        if [[ "$DISTRO" == windows ]]; then   # tailscale.exe can't open /dev/stdin; a file in this user's temp folder instead
+          ts_key="$(mktemp)"; op read "op://$OP_VAULT/$TS_KEY_ITEM/credential" > "$ts_key"
+          "${up[@]}" --auth-key="file:$(cygpath -w "$ts_key")" --timeout=60s && ts_rc=0 || ts_rc=$?
+          rm -f "$ts_key"
+        else
+          op read "op://$OP_VAULT/$TS_KEY_ITEM/credential" | "${up[@]}" --auth-key=file:/dev/stdin --timeout=60s && ts_rc=0 || ts_rc=$?
+        fi
+        ((ts_rc == 0)) ||
           warn "The Tailscale auth key in 1Password didn't work. It may have expired: put a new one in the \"$TS_KEY_ITEM\" item."
       fi
       if ! ts_up; then
@@ -872,7 +904,7 @@ elif pkg_missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_
           sudo rm -f "$TS_SYSCTL"
         fi
       fi
-      ts_prefs_ok || sudo tailscale set --operator="$USER" --accept-routes="$(ts_accept)" --advertise-routes="$lan"
+      ts_prefs_ok || "${TS_ADMIN[@]}" tailscale set "${TS_OWNER[@]}" --accept-routes="$(ts_accept)" --advertise-routes="$lan"
     fi
   fi
 fi
@@ -884,6 +916,65 @@ if desktop && omarchy-cmd-present tailscale; then
   [[ -e "$HOME/.local/share/applications/Tailscale.desktop" ]] ||
     omarchy-webapp-install "Tailscale" "https://login.tailscale.com/admin/machines" https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/tailscale-light.png ||
     warn "Couldn't add the Tailscale admin console web app."
+fi
+
+# --- The SSH server on Windows: Windows' own OpenSSH, an optional feature, set up in one step as administrator.
+# Key logins only (a block at the top of C:\ProgramData\ssh\sshd_config, where the first value wins), the
+# fleet key in administrators_authorized_keys (sshd reads that file instead of ~/.ssh/authorized_keys for
+# an administrator), Git Bash as the shell, the service started with Windows, and a firewall rule of its own
+# that lets SSH in through Tailscale's network adapter only, with Windows' rule for every network turned off.
+# The adapter exists once Tailscale is up, so this step comes after Tailscale's.
+# Checking needs no administrator: the service, a login here with the fleet key, no password logins, the rule.
+WIN_SSH_ADAPTER=Tailscale
+WIN_SSH_RULE="Managed by ~/Projects/aibrain/bootstrap.sh: SSH through the $WIN_SSH_ADAPTER adapter only"
+win_ssh_login() { # win_ssh_login <ssh options>...: log in to this computer and run true; ssh's errors on stdout
+  ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR "$@" "$USER@localhost" true 2>&1
+}
+win_sshd_ok() {
+  [[ "$(powershell.exe -NoProfile -Command '
+    $s = Get-Service sshd -ErrorAction SilentlyContinue
+    $r = Get-NetFirewallRule -Name aibrain-sshd -ErrorAction SilentlyContinue
+    $d = Get-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue
+    "$($s.Status) $($s.StartType)|$($r.Enabled) $($r.Description)|$($d.Enabled)"' | tr -d '\r')" == \
+     "Running Automatic|True $WIN_SSH_RULE|"?(False) ]] &&
+    win_ssh_login -i "$SSH_KEY" -o IdentitiesOnly=yes >/dev/null &&
+    [[ "$(win_ssh_login -o PubkeyAuthentication=no)" == *"Permission denied (publickey)"* ]]
+}
+if [[ "$DISTRO" == windows ]]; then
+  if [[ -z "${ssh_pub:-}" ]]; then
+    warn "The SSH server isn't set up, since the fleet key couldn't be read."
+  elif ! ts_up; then
+    warn "The SSH server isn't set up, since it waits for Tailscale, whose adapter its firewall rule names."
+  elif ! win_sshd_ok; then
+    if ! have_tty; then
+      warn "The SSH server isn't fully set up, and that needs an administrator. Run this once in a terminal."
+    else
+      say "Setting up the SSH server"
+      win_admin "
+if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null }
+\$dir = \"\$env:ProgramData\\ssh\"; \$conf = \"\$dir\\sshd_config\"
+if (-not (Test-Path \$conf)) { Start-Service sshd; Stop-Service sshd }   # its first start writes the config and host keys
+\$block = \"# >>> aibrain >>>\`n# Managed by ~/Projects/aibrain/bootstrap.sh: key logins only.\`nPasswordAuthentication no\`nKbdInteractiveAuthentication no\`n# <<< aibrain <<<\`n\"
+\$text = [IO.File]::ReadAllText(\$conf)
+\$new = \$block + [regex]::Replace(\$text, '(?s)# >>> aibrain >>>.*?# <<< aibrain <<<\r?\n', '')
+if (\$new -ne \$text) { [IO.File]::WriteAllText(\$conf, \$new) }
+& \"\$env:WINDIR\\System32\\OpenSSH\\sshd.exe\" -t; if (\$LASTEXITCODE) { throw \"sshd rejected \$conf\" }
+\$keys = \"\$dir\\administrators_authorized_keys\"; \$line = '$ssh_pub ssh fleet key'
+if (-not (Test-Path \$keys) -or -not (@(Get-Content \$keys) -contains \$line)) { Add-Content -Encoding ascii -LiteralPath \$keys -Value \$line }
+icacls.exe \$keys /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null
+New-Item -Force -Path HKLM:\\SOFTWARE\\OpenSSH | Out-Null
+New-ItemProperty -Force -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -PropertyType String -Value '$(cygpath -w /)\\bin\\bash.exe' | Out-Null
+Set-Service sshd -StartupType Automatic
+Restart-Service sshd
+Disable-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue
+\$rule = @{ Direction = 'Inbound'; Protocol = 'TCP'; LocalPort = 22; Action = 'Allow'; Profile = 'Any'; Enabled = 'True'
+  InterfaceAlias = '$WIN_SSH_ADAPTER'; Description = '$WIN_SSH_RULE' }
+if (Get-NetFirewallRule -Name aibrain-sshd -ErrorAction SilentlyContinue) { Set-NetFirewallRule -Name aibrain-sshd @rule }
+else { New-NetFirewallRule -Name aibrain-sshd -DisplayName 'OpenSSH server, tailnet only (aibrain)' @rule | Out-Null }" &&
+        win_sshd_ok || warn "The SSH server isn't fully set up. Check: ssh -i ~/.ssh/aibrain_fleet $USER@localhost"
+    fi
+  fi
 fi
 
 # --- Logins

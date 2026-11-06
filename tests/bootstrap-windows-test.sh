@@ -4,7 +4,8 @@
 # A throwaway home can't work on Windows, because winget, Program Files and Claude Code's installer act on
 # the real computer whatever HOME says. So this runs the last commit's bootstrap.sh on this computer, twice,
 # as the checkout's copy (AIBRAIN_RERUN, so ~/Projects/aibrain itself is left as it is). It checks that both
-# runs succeed, that the second changes nothing, and that the links and the session-state hook work.
+# runs succeed, that the second changes nothing, and that the links, the session-state hook, the SSH server
+# and Tailscale work.
 # Usage: tests/bootstrap-windows-test.sh
 set -uo pipefail
 [[ "$(uname -s)" == MINGW* ]] || { echo "This test runs on Windows, in Git Bash." >&2; exit 2; }
@@ -52,6 +53,13 @@ check "links are real and resolve" bash -c 'cd ~ && [[ -L .claude/settings.json 
 check "grab-issue skill linked for every tool" bash -c 'for d in .agents .claude .codex .grok; do test -f ~/$d/skills/grab-issue/SKILL.md || exit 1; done'
 check "the checkout's own links are links" test -L "$HOME/Projects/aibrain/.claude/skills/webapp-testing"
 check "session-state hook runs" hook_ok
+login() { # login <ssh options>...: log in to this computer over SSH; ssh's errors on stdout
+  ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR "$@" "${USER:-$USERNAME}@localhost" true 2>&1
+}
+check "the SSH server takes the fleet key" login -i "$HOME/.ssh/aibrain_fleet" -o IdentitiesOnly=yes
+check "the SSH server takes no passwords" bash -c '[[ "$1" == *"Permission denied (publickey)"* ]]' _ "$(login -o PubkeyAuthentication=no)"
+check "on the tailnet" bash -c '[[ "$("/c/Program Files/Tailscale/tailscale.exe" status --json | jq -r .BackendState | tr -d "\r")" == Running ]]'
 
 echo
 if (( fails )); then echo "$fails FAILED"; exit 1; fi
