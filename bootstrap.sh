@@ -1,7 +1,7 @@
 #!/bin/bash
 # aibrain bootstrap: brings any Omarchy machine to the same AI agent setup,
 # whatever state it starts in. Re-running it changes nothing. It also runs on Ubuntu (24.04 is tested),
-# for a computer without Omarchy, such as a headless server.
+# for a computer without Omarchy, such as a headless server, and on Windows 11 in Git Bash.
 #
 # Two repos make the setup. This one, at ~/Projects/aibrain, is public and holds nothing personal.
 # Your personal layer, at ~/Projects/aibrain-personal, holds config.sh (the values below), your
@@ -10,7 +10,7 @@
 # below.
 #
 # Run it from ~/Projects/aibrain/bootstrap.sh, or before anything is cloned, from
-# the clipboard: bash <(wl-paste). Either way, once the checkout matches
+# the clipboard: bash <(wl-paste), or in Git Bash on Windows, bash <(cat /dev/clipboard). Either way, once the checkout matches
 # origin/main it re-runs the checkout's copy, so a run always applies the current setup.
 #
 # Anyone can run it: a person in a terminal, or an agent with no terminal.
@@ -110,19 +110,42 @@ link() { # link <target> <path>: make <path> a symlink to <target>, saving whate
   if [[ -e "$2" || -L "$2" ]]; then saved "$2"; fi
   ln -s "$1" "$2"
 }
-# --- Which system this is: Omarchy, or Ubuntu. Steps that differ ask DISTRO, or use pkg_missing and pkg_add.
-os_id="$( (. /etc/os-release && echo "$ID") 2>/dev/null || true)"
-case "$os_id" in
-  omarchy) DISTRO=omarchy ;;
-  ubuntu) DISTRO=ubuntu UBUNTU_CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")" ;;
-  *) die "This setup runs on Omarchy or Ubuntu, not \"${os_id:-an unknown system}\"." ;;
-esac
+# --- Which system this is: Omarchy, Ubuntu, or Windows (Git Bash). Steps that differ ask DISTRO, or use
+# pkg_missing and pkg_add. On Windows a package is a winget id.
+if [[ "$(uname -s)" == MINGW* ]]; then
+  DISTRO=windows
+  export USER="${USER:-$USERNAME}"   # Windows sets USERNAME; Git Bash doesn't always set USER
+  # ln -s makes a real Windows symlink or fails, instead of quietly copying (links need Developer Mode)
+  export MSYS="${MSYS:+$MSYS }winsymlinks:nativestrict"
+else
+  os_id="$( (. /etc/os-release && echo "$ID") 2>/dev/null || true)"
+  case "$os_id" in
+    omarchy) DISTRO=omarchy ;;
+    ubuntu) DISTRO=ubuntu UBUNTU_CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")" ;;
+    *) die "This setup runs on Omarchy, Ubuntu or Windows (in Git Bash), not \"${os_id:-an unknown system}\"." ;;
+  esac
+fi
 pkg_missing() { # pkg_missing <package>: true when the package isn't installed
-  if [[ "$DISTRO" == omarchy ]]; then
-    omarchy-pkg-missing "$1"
-  else
-    [[ "$(dpkg-query -W -f '${db:Status-Status}' "$1" 2>/dev/null)" != installed ]]
-  fi
+  case "$DISTRO" in
+    omarchy) omarchy-pkg-missing "$1" ;;
+    windows) ! winget list --id "$1" --exact --accept-source-agreements --disable-interactivity >/dev/null 2>&1 ;;
+    *) [[ "$(dpkg-query -W -f '${db:Status-Status}' "$1" 2>/dev/null)" != installed ]] ;;
+  esac
+}
+win_path() { # Windows: put the folders installers added to the registry's PATH on this shell's PATH too
+  # Only new folders go in, at the front, so Git Bash's own tools stay ahead of System32's find and sort.
+  local d new=""
+  while IFS= read -r d; do
+    [[ -n "$d" && ":$PATH:" != *":$d:"* && ":$new:" != *":$d:"* ]] && new+="$d:"
+  done < <(powershell.exe -NoProfile -Command '[Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")' |
+    tr -d '\r' | tr ';' '\n' | while IFS= read -r d; do [[ -n "$d" ]] && cygpath -u "$d"; done)
+  PATH="$new$PATH"
+}
+win_admin() { # win_admin <powershell command>: on Windows, run it as administrator, after Windows asks you (UAC)
+  local ps; ps="$(mktemp --suffix=.ps1)"
+  printf '%s\n' '$ErrorActionPreference = "Stop"' "$1" > "$ps"
+  powershell.exe -NoProfile -Command "\$p = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$(cygpath -w "$ps")'; exit \$p.ExitCode"
+  local rc=$?; rm -f "$ps"; return $rc
 }
 apt_source() { # apt_source <package>: on Ubuntu, the vendor's apt repo and signing key for a package Ubuntu doesn't carry
   local arch key url keyring list line raw
@@ -149,6 +172,18 @@ pkg_add() { # pkg_add <package>...: install the packages that are missing, from 
   for p in "$@"; do if pkg_missing "$p"; then missing+=("$p"); fi; done
   ((${#missing[@]})) || return 0
   say "Installing ${missing[*]}"
+  if [[ "$DISTRO" == windows ]]; then
+    # Per-user where the package allows it, so no administrator is needed. Python goes on the PATH ahead of
+    # Windows' python app aliases.
+    for p in "${missing[@]}"; do
+      local extra=()
+      case "$p" in Python.Python.*) extra=(--scope user --custom PrependPath=1) ;; esac
+      winget install --id "$p" --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity "${extra[@]}" >/dev/null ||
+        die "winget couldn't install $p."
+    done
+    win_path
+    return 0
+  fi
   have_tty || sudo -n true 2>/dev/null || die "${missing[*]} isn't installed, and installing it needs sudo. Run this once in a terminal."
   if [[ "$DISTRO" == omarchy ]]; then
     omarchy-pkg-add "${missing[@]}"
@@ -169,10 +204,11 @@ prune() { # prune <dir> <prefix>...: remove broken symlinks in <dir> that point 
 }
 
 # --- Passwordless sudo for this user, so agents can change the system without asking. Setting it up
-# asks for the password one last time.
+# asks for the password one last time. Windows has no equivalent: each step that changes the whole
+# computer asks you through UAC, and only in a terminal.
 SUDOERS=/etc/sudoers.d/zz-aibrain
 SUDOERS_LINE="$USER ALL=(ALL) NOPASSWD: ALL"
-if [[ "$(sudo -n cat "$SUDOERS" 2>/dev/null)" != "$SUDOERS_LINE" ]]; then
+if [[ "$DISTRO" != windows && "$(sudo -n cat "$SUDOERS" 2>/dev/null)" != "$SUDOERS_LINE" ]]; then
   if have_tty || sudo -n true 2>/dev/null; then
     say "Making sudo passwordless for $USER"
     sudoers_tmp="$(mktemp)"; printf '%s\n' "$SUDOERS_LINE" > "$sudoers_tmp"
@@ -207,18 +243,40 @@ fi
 
 # --- Packages: the 1Password CLI, and Python for the privacy guard and Claude Code's hooks. Omarchy has
 # them in its package repo. Ubuntu also needs what Omarchy comes with, mise among it, and 1Password's
-# and mise's own apt repos.
+# and mise's own apt repos. Windows gets them, jq and the GitHub CLI from winget; Git for Windows is
+# already there, since this runs in its Git Bash.
 if [[ "$DISTRO" == omarchy ]]; then
   pkg_add 1password-cli python
+elif [[ "$DISTRO" == windows ]]; then
+  pkg_add Python.Python.3.13 jqlang.jq AgileBits.1Password.CLI GitHub.cli
+  win_path
+  # The hooks and the privacy guard run python3 on every system. python.org's Windows Python has no
+  # python3.exe, and Windows' own python3 is an app alias that only offers the Store, so the install gets
+  # a python3.exe: a copy of its python.exe, renewed when an update changes that.
+  py_dir="$(python -c 'import os, sys; print(os.path.dirname(sys.executable))' 2>/dev/null | tr -d '\r')" ||
+    die "Python from winget isn't on the PATH. Open a new Git Bash and run this again."
+  py_dir="$(cygpath -u "$py_dir")"
+  cmp -s "$py_dir/python.exe" "$py_dir/python3.exe" || cp "$py_dir/python.exe" "$py_dir/python3.exe"
+  [[ "$(command -v python3)" == "$py_dir/python3" ]] && python3 -c '' ||
+    die "python3 isn't Python from winget but $(command -v python3). Put $py_dir first on the PATH."
+  # Links: the agent tools reach the repos through symlinks, which Windows lets you make only in Developer Mode
+  ln_check="$(mktemp -d)" ln_ok=1
+  ln -s "$ln_check" "$ln_check/link" 2>/dev/null || ln_ok=""
+  rm -rf "$ln_check"
+  [[ -n "$ln_ok" ]] || die "Windows doesn't let this user make symlinks. Turn on Developer Mode (Settings > System > For developers), then run this again."
+  # Bash scripts need LF, which Git for Windows changes to CRLF by default, in every checkout
+  [[ "$(git config --global core.autocrlf)" == false ]] || git config --global core.autocrlf false
 else
   pkg_add ca-certificates curl gpg git jq python3
   pkg_add 1password-cli mise
 fi
 
-# --- gh through mise, the same way Omarchy's launchers in ~/.local/bin do it. Claude Code comes later,
-# once this computer's settings are known.
-say "Installing the GitHub CLI"
-MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet gh
+# --- gh through mise, the same way Omarchy's launchers in ~/.local/bin do it (on Windows it came from
+# winget, above). Claude Code comes later, once this computer's settings are known.
+if [[ "$DISTRO" != windows ]]; then
+  say "Installing the GitHub CLI"
+  MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet gh
+fi
 
 # --- aiagent service account token, for the $OP_VAULT vault
 token_ok() { [[ -n "$1" ]] && OP_SERVICE_ACCOUNT_TOKEN="$1" op vault list --format json 2>/dev/null | jq -e --arg v "$OP_VAULT" 'any(.[]; .name == $v)' >/dev/null; }
@@ -270,10 +328,12 @@ else
 fi
 unset gh_reply
 gh config set -h github.com git_protocol https
-# setup-git would write gh's versioned install path; point at the mise shim so gh upgrades don't break git
+# setup-git would write gh's versioned install path; point at the mise shim so gh upgrades don't break git.
+# winget's gh keeps one path, on the PATH.
+gh_helper="$MISE_SHIMS/gh"; [[ "$DISTRO" != windows ]] || gh_helper=gh
 for host in github.com gist.github.com; do
   git config --global --replace-all "credential.https://$host.helper" ''
-  git config --global --add "credential.https://$host.helper" "!$MISE_SHIMS/gh auth git-credential"
+  git config --global --add "credential.https://$host.helper" "!$gh_helper auth git-credential"
 done
 # --- ~/Projects/aibrain is a checkout of origin/main
 fresh_clone() { # fresh_clone <dir> <repo>: clone <repo> into <dir>, saving whatever was there
@@ -284,12 +344,24 @@ fresh_clone() { # fresh_clone <dir> <repo>: clone <repo> into <dir>, saving what
   mkdir -p "$(dirname "$1")"
   git clone -q "$2" "$1"
   exclude_worktrees "$1"
+  win_links "$1"
+}
+win_links() { # win_links <dir>: on Windows, the checkout's own symlinks are real links
+  # Git for Windows clones links as small text files unless the checkout says it may make links, and
+  # makes them only on a fresh checkout of the file. A file that should be a link is checked out again.
+  [[ "$DISTRO" == windows ]] || return 0
+  local mode f
+  [[ "$(git -C "$1" config core.symlinks)" == true ]] || git -C "$1" config core.symlinks true
+  git -C "$1" ls-files -s | while read -r mode _ _ f; do
+    [[ "$mode" == 120000 && ! -L "$1/$f" ]] || continue
+    rm -f "$1/$f" && git -C "$1" checkout -q -- "$f"
+  done
 }
 exclude_worktrees() { # exclude_worktrees <dir>: Claude Code's session worktrees in .claude/worktrees/ are never local changes
   # It goes in the checkout's own .git/info/exclude, not a .gitignore, so it covers any repo the script
   # keeps, the personal layer included, without a commit there.
   local f; f="$(git -C "$1" rev-parse --git-path info/exclude)"
-  [[ "$f" == /* ]] || f="$1/$f"
+  [[ "$f" == /* || "$f" == [A-Za-z]:/* ]] || f="$1/$f"   # Git for Windows writes an absolute path as C:/...
   grep -qxF '/.claude/worktrees/' "$f" 2>/dev/null && return
   mkdir -p "$(dirname "$f")"
   [[ ! -s "$f" || -z "$(tail -c 1 "$f")" ]] || echo >> "$f"
@@ -306,7 +378,7 @@ for key in ("model", "modelSettings"):
     if key in head: cur[key] = head[key]
     else: cur.pop(key, None)
 if cur == head: sys.exit(3)  # nothing else differs: restore the committed file byte for byte
-with open(path, "w") as f: json.dump(cur, f, indent=2); f.write("\n")
+with open(path, "w", newline="\n") as f: json.dump(cur, f, indent=2); f.write("\n")
 ' "$AIBRAIN/claude/settings.json" || { rc=$?; [[ $rc == 3 ]] && "${g[@]}" checkout -q -- claude/settings.json || true; }
 }
 sync_checkout() { # sync_checkout <dir> <repo>: make <dir> a checkout of <repo>'s main, keeping local work
@@ -321,6 +393,7 @@ sync_checkout() { # sync_checkout <dir> <repo>: make <dir> a checkout of <repo>'
   # per-task choices, not setup changes: they're put back, so they're never stashed or committed.
   [[ "$dir" != "$AIBRAIN" ]] || reset_picks
   exclude_worktrees "$dir"
+  win_links "$dir"
   if [[ -n "$("${g[@]}" status --porcelain)" ]]; then
     "${g[@]}" stash push -q -u -m "aibrain bootstrap $(date -Is)"
     warn "Uncommitted changes in $name are stashed. Get them back with: git -C $name stash pop"
@@ -437,8 +510,12 @@ fi
 [[ "$COMPUTER" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "A computer name is lowercase letters, digits and dashes, not \"$COMPUTER\"."
 if [[ -n "$save_computer" && ! -d "$PERSONAL/computers/$COMPUTER" ]]; then
   say "Adding $COMPUTER to your computers in ~/Projects/aibrain-personal"
-  about="$(hostnamectl --json=short 2>/dev/null |
-    jq -r '[.HardwareVendor, .HardwareModel, .Chassis] | map(select(. != null and . != "")) | join(" ")' 2>/dev/null || true)"
+  if [[ "$DISTRO" == windows ]]; then
+    about="$(powershell.exe -NoProfile -Command '$c = Get-CimInstance Win32_ComputerSystem; "$($c.Manufacturer) $($c.Model)"' 2>/dev/null | tr -d '\r' || true)"
+  else
+    about="$(hostnamectl --json=short 2>/dev/null |
+      jq -r '[.HardwareVendor, .HardwareModel, .Chassis] | map(select(. != null and . != "")) | join(" ")' 2>/dev/null || true)"
+  fi
   mkdir -p "$PERSONAL/computers/$COMPUTER"
   printf '%s\n' "# $COMPUTER: ${about:-a computer}, added $(date +%F)" \
     "# Settings for this computer alone, read after ../../config.sh. Steps of its own go in setup.sh here." \
@@ -456,10 +533,20 @@ fi
 load_config
 
 # --- Claude Code through mise, like gh, unless this computer is Codex-only (CODEX_ONLY). Then a Claude
-# Code from mise is removed, along with its managed settings below.
+# Code from mise is removed, along with its managed settings below. On Windows it's Anthropic's native
+# install, in ~/.local/bin, which keeps itself up to date.
+[[ "$DISTRO" != windows || "$CODEX_ONLY" != 1 ]] || die "CODEX_ONLY isn't supported on Windows yet."
 if [[ "$CODEX_ONLY" != 1 ]]; then
-  say "Installing Claude Code"
-  MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet claude
+  if [[ "$DISTRO" == windows ]]; then
+    if [[ ! -x "$HOME/.local/bin/claude.exe" ]]; then
+      say "Installing Claude Code"
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'irm https://claude.ai/install.ps1 | iex' >/dev/null ||
+        die "Claude Code's installer failed."
+    fi
+  else
+    say "Installing Claude Code"
+    MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet claude
+  fi
   # Claude Code's first start migrates settings.json (it turns "opus" into "opus[1m]") and records that in
   # ~/.claude.json. Let that happen now, before settings.json links to the repo, so it stays as committed.
   claude auth status >/dev/null 2>&1 || true
@@ -469,8 +556,10 @@ elif mise ls --installed claude 2>/dev/null | grep -q .; then
   mise uninstall --quiet --all claude && mise reshim
 fi
 # Codex: Omarchy installs it the first time it's started. Elsewhere it comes through mise, once; a version
-# pinned later (mise use -g codex@<version>) is kept.
-if [[ "$DISTRO" != omarchy ]] && ! mise which codex >/dev/null 2>&1; then
+# pinned later (mise use -g codex@<version>) is kept. Windows doesn't get it yet.
+if [[ "$DISTRO" == windows ]]; then
+  command -v codex >/dev/null || warn "Codex isn't installed on Windows yet."
+elif [[ "$DISTRO" != omarchy ]] && ! mise which codex >/dev/null 2>&1; then
   say "Installing Codex"
   MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet codex
 fi
@@ -503,9 +592,20 @@ prune "$HOME/.local/bin" "$AIBRAIN/bin" "$PERSONAL/bin" "$HOME/.claude/bin"
 
 # --- Claude Code's default model and effort, Opus at medium, in managed settings: the one settings file
 # its /model and /effort pickers never write to and that outranks what they save. A pick still applies
-# to its own session (README, "Model and effort").
+# to its own session (README, "Model and effort"). On Windows the file is in Program Files, which only an
+# administrator may write, so changing it asks you through UAC.
 MANAGED_SETTINGS=/etc/claude-code/managed-settings.json
-if [[ "$CODEX_ONLY" == 1 ]]; then
+if [[ "$DISTRO" == windows ]]; then
+  MANAGED_SETTINGS="/c/Program Files/ClaudeCode/managed-settings.json"
+  if ! cmp -s "$AIBRAIN/claude/managed-settings.json" "$MANAGED_SETTINGS"; then
+    say "Setting Claude Code's default model and effort"
+    have_tty || die "Installing $MANAGED_SETTINGS needs an administrator. Run this once in a terminal."
+    win_admin "New-Item -ItemType Directory -Force -Path '$(cygpath -w "${MANAGED_SETTINGS%/*}")' | Out-Null
+Copy-Item -Force -LiteralPath '$(cygpath -w "$AIBRAIN/claude/managed-settings.json")' -Destination '$(cygpath -w "$MANAGED_SETTINGS")'" &&
+      cmp -s "$AIBRAIN/claude/managed-settings.json" "$MANAGED_SETTINGS" ||
+      die "Couldn't install $MANAGED_SETTINGS. Accept the administrator prompt, then run this again."
+  fi
+elif [[ "$CODEX_ONLY" == 1 ]]; then
   if [[ -e "$MANAGED_SETTINGS" ]]; then
     have_tty || sudo -n true 2>/dev/null || die "Removing $MANAGED_SETTINGS needs sudo. Run this once in a terminal."
     sudo rm -f "$MANAGED_SETTINGS"
@@ -538,7 +638,8 @@ if [[ "$CODEX_ONLY" != 1 ]]; then
 fi
 
 # --- ~/.bashrc loads the aiagent token in every shell. The block must sit above
-# .bashrc's interactive-shell check, because agents' shells are non-interactive.
+# .bashrc's interactive-shell check, because agents' shells are non-interactive. On Windows that's every
+# Git Bash, Claude Code's included; PowerShell doesn't read it.
 say "Updating ~/.bashrc"
 touch "$HOME/.bashrc"
 block="# >>> aibrain >>>
@@ -634,7 +735,9 @@ PermitRootLogin no'
 if [[ "$DISTRO" == omarchy ]]; then SSH_UNITS=(sshd.service); else SSH_UNITS=(ssh.service ssh.socket); fi
 ssh_running() { local u; for u in "${SSH_UNITS[@]}"; do systemctl is-enabled --quiet "$u" && systemctl is-active --quiet "$u" && return 0; done; return 1; }
 if [[ "$DISTRO" == ubuntu ]] && pkg_missing openssh-server; then pkg_add openssh-server; fi
-if [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]] || ! ssh_running; then
+if [[ "$DISTRO" == windows ]]; then
+  warn "The SSH server isn't set up on Windows yet, so your other computers can't log in here."
+elif [[ "$(cat "$SSHD_CONF" 2>/dev/null)" != "$sshd_conf" ]] || ! ssh_running; then
   if ! have_tty && ! sudo -n true 2>/dev/null; then
     warn "The SSH server isn't set up, and that needs sudo. Run this once in a terminal."
   else
@@ -729,6 +832,8 @@ tsd_running() { systemctl is-enabled --quiet tailscaled.service && systemctl is-
 # they run as another computer, so its settings would change the host's.
 if [[ "${AIBRAIN_TEST_KEEP_TAILSCALE:-}" == 1 ]]; then
   :
+elif [[ "$DISTRO" == windows ]]; then
+  warn "Tailscale isn't set up on Windows yet, so this computer isn't on your tailnet."
 elif pkg_missing tailscale || ! tsd_running || ! ts_up || ! ts_prefs_ok || ! ts_fwd_ok; then
   if ! have_tty && ! sudo -n true 2>/dev/null; then
     warn "Tailscale isn't fully set up, and that needs sudo. Run this once in a terminal."
@@ -795,6 +900,8 @@ fi
 CLAUDE_JSON="$HOME/.claude.json"
 trust_dirs=("$os_dir")
 for d in "$HOME"/Projects/*/; do [[ -e "$d.git" || "${d%/}" == "$PERSONAL" ]] && trust_dirs+=("${d%/}"); done
+# Claude Code on Windows names a folder C:/Users/..., where Git Bash says /c/Users/...
+[[ "$DISTRO" != windows ]] || mapfile -t trust_dirs < <(cygpath -m "${trust_dirs[@]}")
 if [[ "$CODEX_ONLY" != 1 && -s "$CLAUDE_JSON" ]] &&
    [[ -n "$(jq -r '.projects as $p | $ARGS.positional[] | select((($p // {})[.] // {}).hasTrustDialogAccepted != true)' --args "${trust_dirs[@]}" < "$CLAUDE_JSON")" ]]; then
   claude_json_tmp="$(mktemp "$CLAUDE_JSON.XXXXXX")"

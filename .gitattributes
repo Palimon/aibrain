@@ -1,0 +1,2 @@
+# LF in every checkout, Windows included: bash can't run scripts with CRLF line endings.
+* text=auto eol=lf
