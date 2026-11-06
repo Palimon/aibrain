@@ -1,6 +1,6 @@
 # aibrain
 
-A setup for AI agent tools on [Omarchy](https://omarchy.org), the same on every computer you own, and on Ubuntu for a computer without Omarchy, such as a headless server. It isn't tied to one tool: today it configures Claude Code, Codex and Grok, and adding another tool means adding a few links. One script, `bootstrap.sh`, brings a computer from any state to the full setup, and running it again changes nothing.
+A setup for AI agent tools on [Omarchy](https://omarchy.org), the same on every computer you own, on Ubuntu for a computer without Omarchy, such as a headless server, and on Windows 11. It isn't tied to one tool: today it configures Claude Code, Codex and Grok, and adding another tool means adding a few links. One script, `bootstrap.sh`, brings a computer from any state to the full setup, and running it again changes nothing.
 
 What it gives you:
 
@@ -23,7 +23,7 @@ What it gives you:
 
 ## Set up a computer
 
-This works on any Omarchy computer, freshly installed or already in use, and on Ubuntu (see [On Ubuntu](#on-ubuntu)). Running it again later is safe. It brings the computer up to date and changes nothing that's already right.
+This works on any Omarchy computer, freshly installed or already in use, on Ubuntu (see [On Ubuntu](#on-ubuntu)) and on Windows 11 (see [On Windows](#on-windows)). Running it again later is safe. It brings the computer up to date and changes nothing that's already right.
 
 ### Before the first computer
 
@@ -63,6 +63,20 @@ The same script runs on Ubuntu; 24.04 is the version the tests cover. The differ
 - **The SSH server** is Ubuntu's `ssh.service`, or `ssh.socket` when that starts it, as on a fresh 24.04. Nothing sets up a firewall.
 
 For a server, give the computer `HEADLESS=1`, and `CODEX_ONLY=1` when Codex is its only agent tool (see "Computers").
+
+### On Windows
+
+The same script runs on Windows 11, in Git Bash. Two steps come first, once:
+
+1. **Git for Windows**, which brings Git Bash. In a terminal: `winget install --id Git.Git -e`.
+2. **Developer Mode**, so the script can make the links the agent tools read their setup through: Settings > System > Advanced (on older builds, For developers), or open `ms-settings:developers`. Without it, the script stops and says so.
+
+Then open Git Bash from the Start menu, copy `bootstrap.sh` as on any computer, and type `bash <(cat /dev/clipboard)`. The questions are the same, except that there's no sudo password: Windows has no passwordless sudo, so a step that changes the whole computer, such as installing Claude Code's managed settings in `C:\Program Files\ClaudeCode`, asks you through a UAC prompt, and only in a terminal. The other differences:
+
+- **Packages come from winget,** per-user where they can: Python 3.13, jq, the 1Password CLI and the GitHub CLI. Python gets a `python3.exe`, a copy of its `python.exe`, because the hooks run `python3` and Windows' own `python3` only offers the Store. Claude Code comes from Anthropic's native installer, in `~/.local/bin`, and keeps itself up to date.
+- **Checkouts get LF line endings and real links:** git's `core.autocrlf` is off, and the script's checkouts have `core.symlinks` on.
+- **The `.bashrc` block reaches every Git Bash,** Claude Code's shells included, but not PowerShell.
+- **Not on Windows yet:** Codex, the SSH server, Tailscale and the OS agent's hotkey. Each run warns about the first three. `CODEX_ONLY` stops the script.
 
 An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a terminal it can't ask for anything, so it needs `OP_SERVICE_ACCOUNT_TOKEN` set and the 1Password CLI already installed. It sets up light unless the computer has a saved choice or `AIBRAIN_SETUP` is set, and `AIBRAIN_COMPUTER=<name>` tells it which computer it's on.
 
@@ -227,7 +241,7 @@ If GitHub rejects the token, put a new GitHub token in the "GitHub Agent" item a
 
 ## Changing the setup
 
-Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, and `tests/privacy-test.sh` tests the privacy guard.
+Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, and on Windows `tests/bootstrap-windows-test.sh` runs it on the computer itself, twice; `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, and `tests/privacy-test.sh` tests the privacy guard.
 
 ## Unsupported keyboard reports
 

@@ -22,7 +22,12 @@ for attempt in 1 2 3; do
     bash tests/agent-cache-test.sh
     bash tests/session-state-test.sh
     python3 tests/labels-test.py
-    bash tests/bootstrap-test.sh all
+    # Windows can't run the throwaway-home scenarios; it runs the commit's bootstrap on this computer twice
+    if [[ "$(uname -s)" == MINGW* ]]; then
+      bash tests/bootstrap-windows-test.sh
+    else
+      bash tests/bootstrap-test.sh all
+    fi
   )
   rm -rf "$validation"
   trap - EXIT
