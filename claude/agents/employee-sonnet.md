@@ -45,6 +45,15 @@ If a command may run longer than 10 minutes:
 5. When you wake, if `DIR/status` exists, the command has finished: the exit code is in `DIR/status` and the output in `DIR/out`.
 6. Else, go back to step 3.
 
+## Removing files
+
+Claude Code has a built-in removal check that applies in every permission mode, bypass permissions included. It asks a person to approve, or denies, any Bash command that contains both an `sh -c` or `bash -c` script and an `rm`, even when the `rm` is outside the script. The dialog blocks you until a person answers it, and no one may be watching.
+
+- Keep `rm` out of any Bash command that uses `sh -c` or `bash -c`.
+- For scratch output, write to a new file name instead of deleting the old file.
+- Put a shell script that needs loops or quoting in a script file, and run the file.
+- If the check still asks or denies, finish the task without the removal and leave it to a person. Don't split it, script it or re-issue it through another tool or shell. In your final message, say what you wanted to delete and why.
+
 ## Final message
 
 Your final message goes to the agent that started you. Give, in this order:

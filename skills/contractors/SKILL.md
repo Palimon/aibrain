@@ -68,6 +68,17 @@ A fresh contractor knows only its brief and the working directory's instruction 
 6. Whether it may commit or push, and for Opus and Fable, whether it may spawn gatherers (yes unless you say no) or other agents (no unless you say yes).
 7. The user's standing directives that apply, verbatim.
 
+## Removing files
+
+Claude Code has a built-in removal check that applies in every permission mode, bypass permissions included, to the main session and to subagents. It asks a person to approve, or denies, any Bash command that contains both an `sh -c` or `bash -c` script and an `rm`, even when the `rm` is outside the script. A subagent that triggers the dialog blocks until a person answers it, and no one may be watching. Apply these rules to your own commands and to every command you write into a brief:
+
+- Keep `rm` out of any Bash command that uses `sh -c` or `bash -c`.
+- For scratch output, write to a new file name instead of deleting the old file.
+- Put a shell script that needs loops or quoting in a script file, and run the file.
+- If the check still asks or denies, finish the task without the removal and leave it to a person. Don't split it, script it or re-issue it through another tool or shell. Tell the user, or the agent that started you, what you wanted to delete and why.
+
+Each agent definition carries the same rules, so a brief needs them only for the commands it spells out.
+
 ## Continuing or starting fresh
 
 Start a fresh contractor by default. Continue one only when what you need lives in it: its checkout, uncommitted changes, a running process, or reading that would take long to repeat.

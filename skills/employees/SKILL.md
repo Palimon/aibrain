@@ -38,6 +38,8 @@ Spawn it by name from a session in its project. The brief carries:
 
 The instance reads its own kit; don't paste kit content into the brief.
 
+A command you put in the brief follows the `contractors` skill's rules for removing files.
+
 ## Continuing or starting fresh
 
 When an instance stops, decide in the same turn: send it everything queued for it in one message, or close it. Don't hold work back to batch it.
