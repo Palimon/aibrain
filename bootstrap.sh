@@ -263,7 +263,7 @@ elif [[ "$DISTRO" == windows ]]; then
   ln_check="$(mktemp -d)" ln_ok=1
   ln -s "$ln_check" "$ln_check/link" 2>/dev/null || ln_ok=""
   rm -rf "$ln_check"
-  [[ -n "$ln_ok" ]] || die "Windows doesn't let this user make symlinks. Turn on Developer Mode (Settings > System > For developers), then run this again."
+  [[ -n "$ln_ok" ]] || die "Windows doesn't let this user make symlinks. Turn on Developer Mode (Settings > System > Advanced, or open ms-settings:developers), then run this again."
   # Bash scripts need LF, which Git for Windows changes to CRLF by default, in every checkout
   [[ "$(git config --global core.autocrlf)" == false ]] || git config --global core.autocrlf false
 else
