@@ -414,6 +414,8 @@ if [[ -z "${AIBRAIN_RERUN:-}" ]]; then
   if [[ "$self_sum" != "$(sha256sum < "$AIBRAIN/bootstrap.sh")" ]]; then
     exec env AIBRAIN_RERUN=1 bash "$AIBRAIN/bootstrap.sh"
   fi
+else
+  win_links "$AIBRAIN"   # the update above does this; a run that skips it still needs real links
 fi
 
 # --- ~/Projects/aibrain-personal, your personal layer. Its repo is AIBRAIN_PERSONAL_REPO when that's set
