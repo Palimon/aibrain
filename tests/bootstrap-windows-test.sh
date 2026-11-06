@@ -38,7 +38,7 @@ snap() { # what a second run must leave as it was
 codex_state() { # what Codex's app server says it trusts, and its projects with their folders
   { printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"1"},"capabilities":{"experimentalApi":true}}}' \
       '{"method":"initialized"}' '{"id":2,"method":"config/read","params":{}}' '{"id":3,"method":"project/list","params":{}}'
-    sleep 5; } | timeout 30 codex app-server 2>/dev/null | tr -d '\r' |
+    sleep 5; } | timeout 30 "$(cygpath "$LOCALAPPDATA")/Microsoft/WinGet/Links/codex.exe" app-server 2>/dev/null | tr -d '\r' |
     jq -r 'if .id == 2 then .result.config.projects // {} | to_entries[] | select(.value.trust_level == "trusted") | "trusted by Codex: \(.key)"
            elif .id == 3 then .result.data[] | "Codex project: \(.name) \(.roots | map(.path) | join(" "))" else empty end' | sort
 }
