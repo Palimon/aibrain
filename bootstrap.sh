@@ -581,10 +581,11 @@ elif mise ls --installed claude 2>/dev/null | grep -q .; then
   mise unuse -g --quiet claude 2>/dev/null || true   # its line in mise's config; this leaves the install
   mise uninstall --quiet --all claude && mise reshim
 fi
-# Codex: Omarchy installs it the first time it's started. Elsewhere it comes through mise, once; a version
-# pinned later (mise use -g codex@<version>) is kept. Windows doesn't get it yet.
+# Codex: Omarchy installs it the first time it's started. On Windows the CLI comes from winget, along with
+# the ChatGPT app from the Microsoft Store, which has Codex in it too; winget upgrade updates both.
+# Elsewhere Codex comes through mise, once; a version pinned later (mise use -g codex@<version>) is kept.
 if [[ "$DISTRO" == windows ]]; then
-  command -v codex >/dev/null || warn "Codex isn't installed on Windows yet."
+  pkg_add OpenAI.Codex 9PLM9XGG6VKS   # 9PLM9XGG6VKS: the ChatGPT app's Store id
 elif [[ "$DISTRO" != omarchy ]] && ! mise which codex >/dev/null 2>&1; then
   say "Installing Codex"
   MISE_MINIMUM_RELEASE_AGE=0 mise use -g --quiet codex
