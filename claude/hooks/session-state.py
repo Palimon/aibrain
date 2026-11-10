@@ -13,8 +13,12 @@ by hooks, verbatim):
 
 The rule every compaction path goes through: compaction happens only between turns (after Stop,
 before the next tool call) and only while state.md is newer than the last tool call, except
-past HARD_CAP, where it is allowed anywhere. autoCompactWindow in settings.json is the soft cap
-that makes Claude Code attempt it. Near the hard cap, each tool call asks for a state.md update.
+past the hard cap, where it is allowed anywhere. autoCompactWindow in settings.json is the soft
+cap that makes Claude Code attempt it. Near the hard cap, each tool call asks for a state.md
+update. The hard cap is HARD_CAP, or WINDOW_MARGIN under the model's own context window when
+that is smaller. The hook learns the window when the API refuses a request as too long: that
+refusal is in the transcript, and while it is the last thing the model got back, compaction is
+allowed anywhere, because blocking the compaction that recovers from it fails every request.
 After a compaction, the files above are injected into the new context.
 Subagent events carry agent_id: they record the subagent's report and change nothing else.
 On an error the hook blocks compaction (below the hard cap) and otherwise does nothing.
@@ -22,19 +26,23 @@ Everything it writes is private to the user (the prompts can hold pasted secrets
 folder is deleted once it's older than Claude Code's own transcript retention (cleanupPeriodDays,
 default 30 days), checked when a session gets its first prompt.
 """
-import json, os, shutil, sys, time, traceback
+import json, os, re, shutil, sys, time, traceback
 
 os.umask(0o077)
 
 HARD_CAP = int(os.environ.get("AIBRAIN_COMPACT_HARD_CAP", "500000"))
-NEAR_CAP = HARD_CAP - 50000      # from here tool calls ask for a state.md update...
+WINDOW_MARGIN = 30000            # the hard cap stays this far under the model's own window
+NEAR_CAP_BELOW = 50000           # this far under the hard cap, tool calls ask for a state.md update...
 NEAR_CAP_REPEAT = 25000          # ...once, then again after each 25k tokens of growth
+STOP_ASKS = 3                    # times Stop asks for a state.md update before the turn may end
 STATE_REQUIRED_AT = 100000       # context size that makes state.md required without subagents
 PROMPT_BUDGET = 48000            # characters of prompts injected after compaction (~12k tokens)
 REPLY_BUDGET = 24000             # characters of recent replies injected (~6k tokens)
 ROOT = os.environ.get("AIBRAIN_SESSION_STATE") or os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "aibrain", "sessions")
 SEP = "\n<!-- entry -->\n"
+TOO_LONG = ("prompt is too long", "input is too long", "exceed context limit")
+WINDOW_IN_ERROR = re.compile(r"(?:too long|exceed context limit)[^\"]*?> (\d+)")
 STATE_WRITERS = {"Write", "Edit", "MultiEdit"}
 
 event = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -82,26 +90,63 @@ def block(reason):
     print(json.dumps({"decision": "block", "reason": reason}))
 
 
-def context_tokens():
-    """Context size of the last request in the main transcript, read from its tail."""
-    path, last = data.get("transcript_path") or "", 0
+def read_transcript():
+    """From the main transcript's tail: the context size of the last request the API answered,
+    whether the API refused the request after it as longer than the model's window, and that
+    window if the refusal names it."""
+    path, ctx, refused, window = data.get("transcript_path") or "", 0, False, None
     try:
         with open(path, "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - 2_000_000))
             lines = f.read().decode("utf-8", "replace").splitlines()
     except OSError:
-        return 0
+        return ctx, refused, window
     for line in lines:
         try:
             e = json.loads(line)
         except ValueError:
             continue
-        u = e.get("message", {}).get("usage") if e.get("type") == "assistant" else None
+        if not isinstance(e, dict) or e.get("type") != "assistant":
+            continue
+        if e.get("isApiErrorMessage"):
+            low = line.lower()
+            refused = any(t in low for t in TOO_LONG)
+            if refused:
+                named = WINDOW_IN_ERROR.search(low)
+                window = int(named.group(1)) if named else None
+            continue
+        u = (e.get("message") or {}).get("usage")
         if u:
-            last = sum(u.get(k) or 0 for k in
-                       ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
-    return last
+            refused, window = False, None
+            ctx = sum(u.get(k) or 0 for k in
+                      ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+    return ctx, refused, window
+
+
+def context_tokens():
+    return read_transcript()[0]
+
+
+def hard_cap():
+    """HARD_CAP, or WINDOW_MARGIN under the model's window once a refusal has shown it."""
+    try:
+        return min(HARD_CAP, int(open(p("window")).read()) - WINDOW_MARGIN)
+    except (OSError, ValueError):
+        return HARD_CAP
+
+
+def learn_window(ctx, window):
+    """Keep the window a refusal showed: the size it names, or the last size that fitted."""
+    with open(p("window"), "w") as f:
+        f.write(str(window or ctx))
+
+
+def number(name):
+    try:
+        return int(open(p(name)).read())
+    except (OSError, ValueError):
+        return 0
 
 
 def stale():
@@ -257,24 +302,24 @@ def main():
                 if isinstance(answers, dict) else json.dumps(resp)[:4000]
             append("prompts.md", f"{SEP}## {now} (answers to a question)\n\n{body}\n")
         if not wrote_state and stale():
-            ctx = context_tokens()
-            try:
-                last_ask = int(open(p("near-cap-asked")).read())
-            except (OSError, ValueError):
-                last_ask = 0
-            if ctx >= NEAR_CAP and ctx >= last_ask + NEAR_CAP_REPEAT:
+            ctx, cap, last_ask = context_tokens(), hard_cap(), number("near-cap-asked")
+            if ctx >= cap - NEAR_CAP_BELOW and ctx >= last_ask + NEAR_CAP_REPEAT:
                 with open(p("near-cap-asked"), "w") as f:
                     f.write(str(ctx))
                 log(f"near the hard cap ({ctx}); asking for a state.md update")
                 print(json.dumps({"hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
-                    "additionalContext": f"The context is at {ctx} tokens. At {HARD_CAP} Claude "
+                    "additionalContext": f"The context is at {ctx} tokens. At {cap} Claude "
                     "Code compacts even in the middle of a turn. Update your state file now, "
                     "then carry on. " + state_spec()}}))
 
     elif event == "PreCompact":
-        ctx, idle, st = context_tokens(), exists("idle"), stale()
-        if ctx >= HARD_CAP:
+        (ctx, refused, window), idle, st = read_transcript(), exists("idle"), stale()
+        if refused:
+            learn_window(ctx, window)
+            log(f"allow after the API refused a request as too long, ctx={ctx} "
+                f"window={window} idle={idle} stale={st}")
+        elif ctx >= hard_cap():
             log(f"allow at the hard cap, ctx={ctx} idle={idle} stale={st}")
         elif idle and not st:
             log(f"allow at a natural break, ctx={ctx}")
@@ -288,12 +333,25 @@ def main():
         reply = data.get("last_assistant_message") or ""
         if reply.strip():
             append("replies.md", f"{SEP}## {now}\n\n{reply}\n")
-        needed = exists("orchestrating") or context_tokens() >= STATE_REQUIRED_AT
-        if needed and stale() and not data.get("stop_hook_active"):
-            log("asking for a state.md update")
+        ctx, refused, window = read_transcript()
+        if refused:  # the turn ended on the refusal; asking for more work would fail the same way
+            learn_window(ctx, window)
+            log(f"the API refused a request as too long, ctx={ctx} window={window}")
+            touch("idle")
+            return
+        needed = exists("orchestrating") or ctx >= STATE_REQUIRED_AT
+        asked = number("stop-asks")
+        if needed and stale() and asked < STOP_ASKS:
+            with open(p("stop-asks"), "w") as f:
+                f.write(str(asked + 1))
+            log(f"asking for a state.md update ({asked + 1} of {STOP_ASKS})")
+            again = (f"{p('state.md')} is still older than your last tool call, so compaction "
+                     "stays blocked. Write it with the Write or Edit tool, not through Bash, and "
+                     "make no other tool call after it. ") if asked else ""
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop",
-                                                     "additionalContext": state_spec()}}))
+                                                     "additionalContext": again + state_spec()}}))
             return  # the turn continues; it isn't a break yet
+        drop("stop-asks")
         if needed and stale():
             log("state.md still stale after asking; compaction stays blocked")
         touch("idle")

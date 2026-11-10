@@ -178,16 +178,16 @@ To change the default itself, edit `claude/managed-settings.json` and run the sc
 
 Claude Code main sessions compact at about 150k tokens, but only at a natural break. Hooks in `claude/settings.json` (all in `claude/hooks/session-state.py`) do this:
 
-- Compaction happens only between turns, after a wait for you or for an agent, and only while the session's state file is newer than its last tool call. Past 500k it's allowed anywhere; from 450k, every tool call asks the session to update its state file first.
+- Compaction happens only between turns, after a wait for you or for an agent, and only while the session's state file is newer than its last tool call. Past the hard cap it's allowed anywhere, and from 50k under it every tool call asks the session to update its state file first. The hard cap is 500k, or 30k under the model's own context window when that is smaller. The hook learns that window the first time the API refuses a request as too long. That request fails; the next one compacts.
 - Every prompt you type, every answer you give to a question, every reply that ends a turn, and every subagent's full report is saved verbatim.
-- In a session that runs subagents or holds over 100k tokens, a turn that used tools can't end until the state file (goal, decisions, next step, files to read first) is updated after the last tool call. If the session ignores that, compaction stays blocked.
+- In a session that runs subagents or holds over 100k tokens, a turn that used tools can't end until the state file (goal, decisions, next step, files to read first) is updated after the last tool call. The hook asks up to three times. If the session ignores that, the turn ends and compaction stays blocked.
 - The agents and jobs still running at each stop are recorded.
 - After a compaction, the prompts, the state file, the agent list and the most recent replies are put back into the context, so the summary isn't the only memory.
 - If the hook fails, compaction waits. A manual `/compact` isn't held back.
 
 The files are in `~/.local/state/aibrain/sessions/<session id>/`, readable by you only, because the prompt log keeps whatever you paste. A session's folder is deleted when it's older than Claude Code keeps its transcripts (`cleanupPeriodDays`, 30 days unless you set it). Every bootstrap run makes the folder private again and checks that the hook runs on that computer. A session that was already running when `settings.json` changed gets the hooks at once but keeps its old compaction window (about 967k on Fable and Opus) until it's restarted. A background job doesn't restart when you leave or `/exit` its view, because it runs in a long-lived Claude Code process; give it the new window with `/autocompact 150k`. That command also saves the window into `claude/settings.json` under `modelSettings`; the next bootstrap run puts it back, or discard it with `git checkout claude/settings.json`.
 
-To change the limits: the soft cap is `autoCompactWindow` and the idle threshold is `CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS` in `claude/settings.json`; the hard cap and the other thresholds are constants at the top of the hook. `tests/session-state-test.sh` checks the hook's decisions after a change. The design and its numbers are in `study/workspace/2026-10-subagent-design.md`.
+To change the limits: the soft cap is `autoCompactWindow` and the idle threshold is `CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS` in `claude/settings.json`; the hard cap and the other thresholds are constants at the top of the hook. `events.log` in the session's folder records every compaction the hook allowed or blocked, with the reason and the context size. `tests/session-state-test.sh` checks the hook's decisions after a change. The design and its numbers are in `study/workspace/2026-10-subagent-design.md`.
 
 ## Subagents
 
