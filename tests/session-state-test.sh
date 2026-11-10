@@ -25,6 +25,9 @@ check() { # check <name> <condition...>
 }
 blocks() { [[ "$1" == *'"decision": "block"'* ]]; }
 asks() { [[ "$1" == *additionalContext* ]]; }
+overflow() { # overflow <tokens> <window>: the API refused the last request as longer than the model's window
+  printf '{"type":"assistant","isApiErrorMessage":true,"message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}],"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"errorDetails":"prompt is too long: %s tokens > %s maximum"}\n' "$1" "$2" >> "$TR"
+}
 tool() { ev PostToolUse "\"tool_name\":\"$1\",\"tool_input\":${2:-{\}}" ; }
 write_state() { echo "# state" > "$D/state.md"; tool Write "{\"file_path\":\"$D/state.md\"}" >/dev/null; }
 reset() { rm -rf "$W/state"; ctx 50000; }
@@ -36,7 +39,9 @@ check "blocked during a turn" blocks "$(ev PreCompact '"trigger":"auto"')"
 # 2. Orchestrating session, state.md missing: Stop asks; ignored ask leaves compaction blocked.
 reset; ev SubagentStart '"agent_id":"a1","agent_type":"general-purpose"'; tool Read >/dev/null
 check "Stop asks for state.md" asks "$(ev Stop '"last_assistant_message":"reply one"')"
-check "ignored ask: Stop ends turn" test -z "$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
+check "ignored ask: Stop asks again" asks "$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
+check "second ask says the file is still stale" grep -q "still older" <<<"$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
+check "three asks ignored: Stop ends turn" test -z "$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
 check "ignored ask: compaction still blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
 
 # 3. State written as the last step: Stop passes, compaction allowed at the next turn.
@@ -69,6 +74,23 @@ write_state
 check "near hard cap, state fresh: no ask" test -z "$(tool Write "{\"file_path\":\"$D/state.md\"}")"
 ctx 510000; tool Bash >/dev/null
 check "hard cap: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+
+# 7b. A model whose window is under the hard cap: the API's refusal lets compaction through
+# mid-turn, and from then on the hard cap sits under that window.
+reset; ctx 190000; tool Read >/dev/null
+check "under the window, mid-turn: blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
+overflow 204000 200000
+check "after the API's refusal: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "the refusal doesn't hide the context size" grep -q "ctx=190000" "$D/events.log"
+check "Stop after a refusal doesn't ask for state.md" test -z "$(ev Stop '"last_assistant_message":"Prompt is too long"')"
+ctx 125000
+check "learned window: tool call asks 50k under its cap" asks "$(tool Bash)"
+ctx 160000
+check "learned window, 40k under it: blocked mid-turn" blocks "$(ev PreCompact '"trigger":"auto"')"
+ctx 175000
+check "learned window, 25k under it: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+reset; ctx 190000; tool Read >/dev/null
+check "a new session starts from the configured hard cap" blocks "$(ev PreCompact '"trigger":"auto"')"
 
 # 8. Fix 6: full subagent reports, and SubagentHandback reports.
 reset
