@@ -11,8 +11,8 @@ export AIBRAIN_SESSION_STATE="$W/state" AIBRAIN_COMPACT_HARD_CAP=500000
 S=sess1; D="$W/state/$S"; TR="$W/transcript.jsonl"
 fails=0
 
-ctx() { # ctx <tokens>: make the transcript's last request this big
-  printf '{"type":"assistant","message":{"usage":{"input_tokens":0,"cache_read_input_tokens":%s,"cache_creation_input_tokens":0}}}\n' "$1" > "$TR"
+ctx() { # ctx <tokens> [model]: make the transcript's last request this big
+  printf '{"type":"assistant","message":{"model":"%s","usage":{"input_tokens":0,"cache_read_input_tokens":%s,"cache_creation_input_tokens":0}}}\n' "${2:-model-a}" "$1" > "$TR"
 }
 ev() { # ev <Event> [extra json fields]: run the hook, print its stdout
   local extra="${2:-}"
@@ -25,8 +25,14 @@ check() { # check <name> <condition...>
 }
 blocks() { [[ "$1" == *'"decision": "block"'* ]]; }
 asks() { [[ "$1" == *additionalContext* ]]; }
-overflow() { # overflow <tokens> <window>: the API refused the last request as longer than the model's window
-  printf '{"type":"assistant","isApiErrorMessage":true,"message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}],"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"errorDetails":"prompt is too long: %s tokens > %s maximum"}\n' "$1" "$2" >> "$TR"
+sent() { # sent: Claude Code sent a request that has no reply yet, as at the compaction that recovers from the API's refusal
+  echo '{"type":"api-request","querySource":"sdk"}' >> "$TR"
+}
+refused() { # refused <tokens> <window>: the API's refusal, as Claude Code writes it once the recovery failed
+  printf '{"type":"assistant","isApiErrorMessage":true,"error":"invalid_request","apiErrorStatus":400,"message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}],"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"errorDetails":"400 {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"prompt is too long: %s tokens > %s maximum\\"}}"}\n' "$1" "$2" >> "$TR"
+}
+refused_here() { # refused_here: Claude Code's own refusal before sending, which names no numbers
+  echo '{"type":"assistant","isApiErrorMessage":true,"error":"invalid_request","message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}],"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}' >> "$TR"
 }
 tool() { ev PostToolUse "\"tool_name\":\"$1\",\"tool_input\":${2:-{\}}" ; }
 write_state() { echo "# state" > "$D/state.md"; tool Write "{\"file_path\":\"$D/state.md\"}" >/dev/null; }
@@ -40,9 +46,13 @@ check "blocked during a turn" blocks "$(ev PreCompact '"trigger":"auto"')"
 reset; ev SubagentStart '"agent_id":"a1","agent_type":"general-purpose"'; tool Read >/dev/null
 check "Stop asks for state.md" asks "$(ev Stop '"last_assistant_message":"reply one"')"
 check "ignored ask: Stop asks again" asks "$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
-check "second ask says the file is still stale" grep -q "still older" <<<"$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
+check "later asks say the file is still older" grep -q "still older" <<<"$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
 check "three asks ignored: Stop ends turn" test -z "$(ev Stop '"stop_hook_active":true,"last_assistant_message":"reply two"')"
 check "ignored ask: compaction still blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
+reset; ev SubagentStart '"agent_id":"a1","agent_type":"general-purpose"'; tool Read >/dev/null
+ev Stop '"last_assistant_message":"asked once"' >/dev/null
+ev UserPromptSubmit '"prompt":"a new turn after an interrupted one"' >/dev/null; tool Read >/dev/null
+check "a new turn's first ask starts over" bash -c '! grep -q "still older" <<<"$1"' _ "$(ev Stop '"last_assistant_message":"x"')"
 
 # 3. State written as the last step: Stop passes, compaction allowed at the next turn.
 write_state
@@ -74,23 +84,55 @@ write_state
 check "near hard cap, state fresh: no ask" test -z "$(tool Write "{\"file_path\":\"$D/state.md\"}")"
 ctx 510000; tool Bash >/dev/null
 check "hard cap: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+ctx 40000; tool Bash >/dev/null; ctx 455000
+check "near hard cap after a compaction: asks again" asks "$(tool Bash)"
 
-# 7b. A model whose window is under the hard cap: the API's refusal lets compaction through
-# mid-turn, and from then on the hard cap sits under that window.
-reset; ctx 190000; tool Read >/dev/null
+# 7b. A model whose window is under the hard cap. The API refuses the request that outgrows it,
+# and the compaction that recovers goes through mid-turn before the refusal is in the transcript;
+# from then on the hard cap sits under that window.
+reset; ctx 165000; tool Read >/dev/null
 check "under the window, mid-turn: blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
-overflow 204000 200000
-check "after the API's refusal: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
-check "the refusal doesn't hide the context size" grep -q "ctx=190000" "$D/events.log"
-check "Stop after a refusal doesn't ask for state.md" test -z "$(ev Stop '"last_assistant_message":"Prompt is too long"')"
+sent
+check "recovery from the API's refusal: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "the recovery is logged with the context size" grep -q "no reply.*ctx=165000" "$D/events.log"
+check "learns the standard window above the last fit" grep -q "^200000 model-a" "$D/window"
 ctx 125000
 check "learned window: tool call asks 50k under its cap" asks "$(tool Bash)"
 ctx 160000
 check "learned window, 40k under it: blocked mid-turn" blocks "$(ev PreCompact '"trigger":"auto"')"
 ctx 175000
 check "learned window, 25k under it: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+ctx 190000 model-b
+check "another model: the configured hard cap again" blocks "$(ev PreCompact '"trigger":"auto"')"
+ctx 210000
+check "a request past the learned window: the configured hard cap again" blocks "$(ev PreCompact '"trigger":"auto"')"
 reset; ctx 190000; tool Read >/dev/null
 check "a new session starts from the configured hard cap" blocks "$(ev PreCompact '"trigger":"auto"')"
+
+# 7c. The recovery failed, so the refusal is in the transcript: allowed until a request succeeds.
+reset; ctx 150000; tool Read >/dev/null; sent; refused 320000 300000
+check "after the API's refusal: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "learns the window the refusal names" grep -q "^300000 " "$D/window"
+echo '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"Rate limited"}]}}' >> "$TR"
+check "another API error after it: still allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+ctx 150000
+check "a request that succeeds ends it" blocks "$(ev PreCompact '"trigger":"auto"')"
+sent; ev PreCompact '"trigger":"auto"' >/dev/null
+check "a later recovery keeps the window named before" grep -q "^300000 " "$D/window"
+
+# 7d. Claude Code's own refusal, before sending: no numbers, so the window is the standard one
+# above the last fit; with no fit in the transcript, nothing is learned.
+reset; ctx 167000; tool Read >/dev/null; refused_here
+check "after Claude Code's own refusal: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "learns the standard window" grep -q "^200000 " "$D/window"
+reset; echo '{"type":"user","message":{"content":"a paste too big to answer"}}' > "$TR"; refused_here
+check "refusal with no fit: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "refusal with no fit: no window learned" test ! -e "$D/window"
+
+# 7e. A hook failure during the recovery doesn't block it.
+reset; ctx 165000; tool Read >/dev/null; sent; mkdir -p "$D/window"
+check "failure while recovering: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "failure while recovering: logged" test -s "$D/errors.log"
 
 # 8. Fix 6: full subagent reports, and SubagentHandback reports.
 reset
