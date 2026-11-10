@@ -75,12 +75,32 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" PostToolUseFailure"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" Stop"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" StopFailure"
           }
         ]
       }

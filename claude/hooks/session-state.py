@@ -11,35 +11,33 @@ by hooks, verbatim):
   state.md         goal, decisions, next step, read-first list: written by the model, which the
                    Stop hook makes do it before a turn that did work can end
 Bookkeeping, also in that folder: events.log (each decision), errors.log, idle, last-work,
-orchestrating, near-cap-asked, stop-asks, window (the model's context window, once learned).
+orchestrating, near-cap-asked, stop-asks.
 
 The rule every compaction path goes through: compaction happens only between turns (after Stop,
 before the next tool call) and only while state.md is newer than the last tool call, except
 past the hard cap, where it is allowed anywhere. autoCompactWindow in settings.json is the soft
 cap that makes Claude Code attempt it. Near the hard cap, a tool call made while state.md is
-stale asks for an update. The hard cap is HARD_CAP, or WINDOW_MARGIN under the model's own
-context window when that is lower.
-A request longer than the model's window fails in one of two ways. The API refuses it, and
-Claude Code compacts to recover; that refusal reaches the transcript only after this hook has
-run, and only if the recovery fails. Or Claude Code refuses it itself before sending, writes
-the refusal, and ends the turn without trying to compact. Blocking the recovery fails the
-request, so compaction is allowed anywhere while a sent request has no reply yet, or while a
-refusal is the last thing the model got back. That is also when the hook learns the window.
+stale asks for an update.
+A turn ends with Stop, or with StopFailure when an API error ended it; either is a break. A
+tool call counts as work whether it succeeds (PostToolUse) or fails (PostToolUseFailure).
+When the context outgrows the window Claude Code assumes for the model (200k for a model newer
+than the Claude Code build), the request is refused as too long and the turn ends; Claude
+Code's own refusal, made before sending, fires neither Stop nor StopFailure. While that refusal
+is the last thing the model got back, compaction is allowed anywhere, so the next turn compacts
+instead of being refused again.
 After a compaction, the files above are injected into the new context.
 Subagent events carry agent_id: they record the subagent's report and change nothing else.
-On an error the hook blocks compaction below the hard cap, unless it is recovering from a
-refusal, and otherwise does nothing.
+On an error the hook blocks compaction below the hard cap, unless a refusal is the last reply,
+and otherwise does nothing.
 Everything it writes is private to the user (the prompts can hold pasted secrets). A session's
 folder is deleted once it's older than Claude Code's own transcript retention (cleanupPeriodDays,
 default 30 days), checked when a session gets its first prompt.
 """
-import json, os, re, shutil, sys, time, traceback
+import json, os, shutil, sys, time, traceback
 
 os.umask(0o077)
 
-HARD_CAP = int(os.environ.get("AIBRAIN_COMPACT_HARD_CAP", "500000"))
-WINDOW_MARGIN = 30000            # the hard cap stays this far under the model's own window
-WINDOWS = (200000, 1000000)      # the context windows Claude models come with
+HARD_CAP = int(os.environ.get("AIBRAIN_COMPACT_HARD_CAP", "200000"))
 NEAR_CAP_BELOW = 50000           # this far under the hard cap, tool calls ask for a state.md update...
 NEAR_CAP_REPEAT = 25000          # ...once, then again after each 25k tokens of growth
 STOP_ASKS = 3                    # times Stop asks for a state.md update before the turn may end
@@ -50,7 +48,6 @@ ROOT = os.environ.get("AIBRAIN_SESSION_STATE") or os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "aibrain", "sessions")
 SEP = "\n<!-- entry -->\n"
 TOO_LONG = ("prompt is too long", "input is too long", "exceed context limit")
-WINDOW_IN_ERROR = re.compile(r"(?:too long|exceed context limit)[^\"]*?> (\d+)")
 STATE_WRITERS = {"Write", "Edit", "MultiEdit"}
 
 event = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -99,12 +96,9 @@ def block(reason):
 
 
 def read_transcript():
-    """From the main transcript's tail:
-      ctx, model  the context size of the last request the API answered, and its model
-      refused     a too-long refusal came after that answer; window: the window it names, if any
-      unanswered  the last request Claude Code sent has no reply yet: at PreCompact, the API
-                  refused it as too long and this is the compaction that recovers from it"""
-    t = {"ctx": 0, "model": None, "refused": False, "window": None, "unanswered": False}
+    """From the main transcript's tail: ctx, the context size of the last request the API
+    answered, and refused, whether a too-long refusal came after that answer."""
+    t = {"ctx": 0, "refused": False}
     try:
         with open(data.get("transcript_path") or "", "rb") as f:
             f.seek(0, 2)
@@ -117,54 +111,19 @@ def read_transcript():
             e = json.loads(line)
         except ValueError:
             continue
-        kind = e.get("type") if isinstance(e, dict) else None
-        if kind in ("api-request", "user", "assistant"):
-            t["unanswered"] = kind == "api-request"
-        if kind != "assistant":
+        if not isinstance(e, dict) or e.get("type") != "assistant":
             continue
         if e.get("isApiErrorMessage"):  # other API errors leave an earlier refusal standing
-            low = line.lower()
-            if any(s in low for s in TOO_LONG):
-                named = WINDOW_IN_ERROR.search(low)
-                t["refused"], t["window"] = True, int(named.group(1)) if named else None
+            if any(s in line.lower() for s in TOO_LONG):
+                t["refused"] = True
             continue
         msg = e.get("message")
         u = msg.get("usage") if isinstance(msg, dict) else None
         if isinstance(u, dict):
-            t.update(refused=False, window=None, model=msg.get("model"), ctx=sum(
+            t.update(refused=False, ctx=sum(
                 u.get(k) or 0 for k in
                 ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")))
     return t
-
-
-def known_window(t):
-    """The window a refusal showed, if it still counts: not one learned on another model, or one
-    that a later request outgrew."""
-    try:
-        size, _, model = open(p("window")).read().partition(" ")
-        size, model = int(size), model.strip()
-    except (OSError, ValueError):
-        return None
-    if t["ctx"] > size or (model and t["model"] and model != t["model"]):
-        return None
-    return size
-
-
-def hard_cap(t):
-    """HARD_CAP, or WINDOW_MARGIN under the model's window once a refusal has shown it."""
-    window = known_window(t)
-    return min(HARD_CAP, window - WINDOW_MARGIN) if window else HARD_CAP
-
-
-def learn_window(t):
-    """Keep the model's window: the size the refusal names, or else the window already known,
-    or else the smallest standard window above the last size that fitted. Nothing, when no
-    request fitted yet."""
-    window = t["window"] or known_window(t) or next(
-        (w for w in WINDOWS if t["ctx"] and w > t["ctx"]), None)
-    if window and window > 2 * WINDOW_MARGIN:
-        with open(p("window"), "w") as f:
-            f.write(f"{window} {t['model'] or ''}\n")
 
 
 def number(name):
@@ -329,28 +288,29 @@ def main():
             append("prompts.md", f"{SEP}## {now} (answers to a question)\n\n{body}\n")
         if not wrote_state and stale():
             t = read_transcript()
-            ctx, cap, last_ask = t["ctx"], hard_cap(t), number("near-cap-asked")
+            ctx, last_ask = t["ctx"], number("near-cap-asked")
             if last_ask > ctx:  # a compaction since the last ask
                 last_ask = 0
-            if ctx >= cap - NEAR_CAP_BELOW and ctx >= last_ask + NEAR_CAP_REPEAT:
+            if ctx >= HARD_CAP - NEAR_CAP_BELOW and ctx >= last_ask + NEAR_CAP_REPEAT:
                 with open(p("near-cap-asked"), "w") as f:
                     f.write(str(ctx))
                 log(f"near the hard cap ({ctx}); asking for a state.md update")
                 print(json.dumps({"hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
-                    "additionalContext": f"The context is at {ctx} tokens. At {cap} Claude "
+                    "additionalContext": f"The context is at {ctx} tokens. At {HARD_CAP} Claude "
                     "Code compacts even in the middle of a turn. Update your state file now, "
                     "then carry on. " + state_spec()}}))
+
+    elif event == "PostToolUseFailure":  # a failed tool call is work too
+        drop("idle")
+        touch("last-work")
 
     elif event == "PreCompact":
         t, idle, st = read_transcript(), exists("idle"), stale()
         ctx = t["ctx"]
-        if t["unanswered"] or t["refused"]:
-            why = ("the last request sent has no reply: the API refused it as too long"
-                   if t["unanswered"] else "a too-long refusal is the last reply")
-            log(f"allow: {why}, ctx={ctx} window={t['window']} idle={idle} stale={st}")
-            learn_window(t)
-        elif ctx >= hard_cap(t):
+        if t["refused"]:
+            log(f"allow: a too-long refusal is the last reply, ctx={ctx} idle={idle} stale={st}")
+        elif ctx >= HARD_CAP:
             log(f"allow at the hard cap, ctx={ctx} idle={idle} stale={st}")
         elif idle and not st:
             log(f"allow at a natural break, ctx={ctx}")
@@ -379,6 +339,11 @@ def main():
         drop("stop-asks")
         if needed and stale():
             log("state.md still stale after asking; compaction stays blocked")
+        touch("idle")
+
+    elif event == "StopFailure":  # an API error ended the turn: a break, with no reply to keep
+        drop("stop-asks")  # and no task list to write
+        log(f"turn ended by an error: {one_line(str(data.get('error') or ''), 120)}")
         touch("idle")
 
     elif event == "SessionStart" and data.get("source") == "compact":
@@ -410,7 +375,7 @@ except Exception:
     if event == "PreCompact":
         try:
             t = read_transcript()
-            wait = not (t["unanswered"] or t["refused"]) and t["ctx"] < hard_cap(t)
+            wait = not t["refused"] and t["ctx"] < HARD_CAP
         except Exception:
             wait = True
         if wait:

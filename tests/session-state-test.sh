@@ -7,12 +7,12 @@ HOOK="$(cd "$(dirname "$0")/.." && pwd)/claude/hooks/session-state.py"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 # On Windows, the C:/ form, so Python can read the paths these tests put in JSON, like the Windows paths Claude Code sends
 command -v cygpath >/dev/null && W="$(cygpath -m "$W")"
-export AIBRAIN_SESSION_STATE="$W/state" AIBRAIN_COMPACT_HARD_CAP=500000
+export AIBRAIN_SESSION_STATE="$W/state"; unset AIBRAIN_COMPACT_HARD_CAP  # the default hard cap, 200k
 S=sess1; D="$W/state/$S"; TR="$W/transcript.jsonl"
 fails=0
 
-ctx() { # ctx <tokens> [model]: make the transcript's last request this big
-  printf '{"type":"assistant","message":{"model":"%s","usage":{"input_tokens":0,"cache_read_input_tokens":%s,"cache_creation_input_tokens":0}}}\n' "${2:-model-a}" "$1" > "$TR"
+ctx() { # ctx <tokens>: make the transcript's last request this big
+  printf '{"type":"assistant","message":{"model":"model-a","usage":{"input_tokens":0,"cache_read_input_tokens":%s,"cache_creation_input_tokens":0}}}\n' "$1" > "$TR"
 }
 ev() { # ev <Event> [extra json fields]: run the hook, print its stdout
   local extra="${2:-}"
@@ -25,10 +25,10 @@ check() { # check <name> <condition...>
 }
 blocks() { [[ "$1" == *'"decision": "block"'* ]]; }
 asks() { [[ "$1" == *additionalContext* ]]; }
-sent() { # sent: Claude Code sent a request that has no reply yet, as at the compaction that recovers from the API's refusal
-  echo '{"type":"api-request","querySource":"sdk"}' >> "$TR"
+sent() { # sent: Claude Code sent a request whose reply isn't on disk yet, as at most proactive compactions
+  echo '{"type":"api-request","querySource":"repl_main_thread"}' >> "$TR"
 }
-refused() { # refused <tokens> <window>: the API's refusal, as Claude Code writes it once the recovery failed
+refused() { # refused <tokens> <window>: the API's refusal, as Claude Code writes it once its recovery failed
   printf '{"type":"assistant","isApiErrorMessage":true,"error":"invalid_request","apiErrorStatus":400,"message":{"model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}],"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"errorDetails":"400 {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"prompt is too long: %s tokens > %s maximum\\"}}"}\n' "$1" "$2" >> "$TR"
 }
 refused_here() { # refused_here: Claude Code's own refusal before sending, which names no numbers
@@ -58,6 +58,9 @@ check "a new turn's first ask starts over" bash -c '! grep -q "still older" <<<"
 write_state
 check "fresh state: Stop passes" test -z "$(ev Stop '"last_assistant_message":"reply three"')"
 check "fresh state at a break: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+ev UserPromptSubmit '"prompt":"next"' >/dev/null
+ev PostToolUseFailure '"tool_name":"Bash","tool_input":{},"error":"Exit code 1"' >/dev/null
+check "a failed tool call makes the turn busy" blocks "$(ev PreCompact '"trigger":"auto"')"
 
 # 4. Fix 1: state written early, more work after it: stale again.
 tool Bash >/dev/null
@@ -75,64 +78,67 @@ ctx 160000
 check "jump past soft cap without state.md: blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
 
 # 7. Fix 5: near the hard cap, tool calls ask for an update; at the hard cap it's allowed mid-turn.
-reset; ctx 460000
+reset; ctx 145000
+check "50k under the hard cap: no ask yet" test -z "$(tool Bash)"
+ctx 160000
 check "near hard cap: tool call asks" asks "$(tool Bash)"
 check "near hard cap: doesn't ask again right away" test -z "$(tool Bash)"
-ctx 486000
+ctx 186000
 check "near hard cap: asks again after 25k more" asks "$(tool Bash)"
+check "the ask names the hard cap" grep -q "At 200000" <<<"$(ctx 211000; tool Bash)"
 write_state
 check "near hard cap, state fresh: no ask" test -z "$(tool Write "{\"file_path\":\"$D/state.md\"}")"
-ctx 510000; tool Bash >/dev/null
-check "hard cap: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
-ctx 40000; tool Bash >/dev/null; ctx 455000
-check "near hard cap after a compaction: asks again" asks "$(tool Bash)"
-
-# 7b. A model whose window is under the hard cap. The API refuses the request that outgrows it,
-# and the compaction that recovers goes through mid-turn before the refusal is in the transcript;
-# from then on the hard cap sits under that window.
-reset; ctx 165000; tool Read >/dev/null
-check "under the window, mid-turn: blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
+ctx 195000; tool Bash >/dev/null
+check "just under the hard cap: blocked mid-turn" blocks "$(ev PreCompact '"trigger":"auto"')"
 sent
-check "recovery from the API's refusal: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
-check "the recovery is logged with the context size" grep -q "no reply.*ctx=165000" "$D/events.log"
-check "learns the standard window above the last fit" grep -q "^200000 model-a" "$D/window"
-ctx 125000
-check "learned window: tool call asks 50k under its cap" asks "$(tool Bash)"
-ctx 160000
-check "learned window, 40k under it: blocked mid-turn" blocks "$(ev PreCompact '"trigger":"auto"')"
-ctx 175000
-check "learned window, 25k under it: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
-ctx 190000 model-b
-check "another model: the configured hard cap again" blocks "$(ev PreCompact '"trigger":"auto"')"
-ctx 210000
-check "a request past the learned window: the configured hard cap again" blocks "$(ev PreCompact '"trigger":"auto"')"
-reset; ctx 190000; tool Read >/dev/null
-check "a new session starts from the configured hard cap" blocks "$(ev PreCompact '"trigger":"auto"')"
+check "a request whose reply isn't on disk yet: still blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
+ctx 200000; tool Bash >/dev/null
+check "hard cap: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
+ctx 40000; tool Bash >/dev/null; ctx 155000
+check "near hard cap after a compaction: asks again" asks "$(tool Bash)"
+AIBRAIN_COMPACT_HARD_CAP=500000 ctx 210000
+check "the hard cap can be set" blocks "$(AIBRAIN_COMPACT_HARD_CAP=500000 ev PreCompact '"trigger":"auto"')"
 
-# 7c. The recovery failed, so the refusal is in the transcript: allowed until a request succeeds.
-reset; ctx 150000; tool Read >/dev/null; sent; refused 320000 300000
-check "after the API's refusal: allowed mid-turn" test -z "$(ev PreCompact '"trigger":"auto"')"
-check "learns the window the refusal names" grep -q "^300000 " "$D/window"
+# 7b. A too-long refusal ends the turn: Claude Code's own, before sending, once the context
+# passes the window it assumes for the model (no Stop or StopFailure follows it), or the API's
+# after a failed recovery (StopFailure follows). Compaction is allowed until a request succeeds.
+reset; ev UserPromptSubmit '"prompt":"go on"' >/dev/null; ctx 178000; tool Read >/dev/null
+check "under the hard cap, mid-turn: blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
+refused_here
+check "after Claude Code's own refusal: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "the refusal is logged with the last context size" grep -q "refusal is the last reply, ctx=178000" "$D/events.log"
+ev UserPromptSubmit '"prompt":"hi"' >/dev/null; sent
+check "the next turn, refusal still last: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
 echo '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"Rate limited"}]}}' >> "$TR"
 check "another API error after it: still allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
-ctx 150000
+ctx 150000; tool Read >/dev/null
 check "a request that succeeds ends it" blocks "$(ev PreCompact '"trigger":"auto"')"
-sent; ev PreCompact '"trigger":"auto"' >/dev/null
-check "a later recovery keeps the window named before" grep -q "^300000 " "$D/window"
-
-# 7d. Claude Code's own refusal, before sending: no numbers, so the window is the standard one
-# above the last fit; with no fit in the transcript, nothing is learned.
-reset; ctx 167000; tool Read >/dev/null; refused_here
-check "after Claude Code's own refusal: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
-check "learns the standard window" grep -q "^200000 " "$D/window"
+reset; ctx 150000; tool Read >/dev/null; sent; refused 320000 300000
+check "after the API's refusal: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "StopFailure says nothing" test -z "$(ev StopFailure '"error":"invalid_request","error_details":"Prompt is too long"')"
+check "StopFailure: the turn is over" test -e "$D/idle"
+check "StopFailure leaves the agent list alone" test ! -e "$D/tasks.md"
+check "StopFailure is logged" grep -q "turn ended by an error: invalid_request" "$D/events.log"
 reset; echo '{"type":"user","message":{"content":"a paste too big to answer"}}' > "$TR"; refused_here
-check "refusal with no fit: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
-check "refusal with no fit: no window learned" test ! -e "$D/window"
+check "a refusal with no request before it: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
 
-# 7e. A hook failure during the recovery doesn't block it.
-reset; ctx 165000; tool Read >/dev/null; sent; mkdir -p "$D/window"
-check "failure while recovering: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
-check "failure while recovering: logged" test -s "$D/errors.log"
+# 7c. StopFailure is a break like Stop: allowed once state.md is current, and it ends Stop's asks.
+reset; ev SubagentStart '"agent_id":"a1","agent_type":"general-purpose"'; tool Read >/dev/null
+ev Stop '"last_assistant_message":"asked once"' >/dev/null
+ev StopFailure '"error":"server_error"' >/dev/null
+check "after StopFailure, stale state.md: blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
+check "StopFailure ends the turn's asks" test ! -e "$D/stop-asks"
+write_state; ev StopFailure '"error":"server_error"' >/dev/null
+check "after StopFailure, current state.md: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+
+# 7d. A hook failure while a refusal is the last reply doesn't block the compaction.
+reset; ctx 165000; tool Read >/dev/null; refused_here; rm -f "$D/events.log"; mkdir -p "$D/events.log"
+check "failure after a refusal: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+check "failure after a refusal: logged" test -s "$D/errors.log"
+reset; ctx 205000; tool Read >/dev/null; rm -f "$D/events.log"; mkdir -p "$D/events.log"
+check "failure at the hard cap: allowed" test -z "$(ev PreCompact '"trigger":"auto"')"
+reset; ctx 195000; tool Read >/dev/null; rm -f "$D/events.log"; mkdir -p "$D/events.log"
+check "failure under the hard cap: blocked" blocks "$(ev PreCompact '"trigger":"auto"')"
 
 # 8. Fix 6: full subagent reports, and SubagentHandback reports.
 reset
@@ -151,6 +157,10 @@ reset; ev SubagentStart '"agent_id":"a4","agent_type":"general-purpose"'; tool R
 ev Stop '"last_assistant_message":"waiting"' >/dev/null
 ev PostToolUse '"agent_id":"a4","tool_name":"Bash","tool_input":{}' >/dev/null
 check "subagent tools ignored: allowed at the break" test -z "$(ev PreCompact '"trigger":"auto"')"
+ev PostToolUseFailure '"agent_id":"a4","tool_name":"Bash","tool_input":{},"error":"Exit code 1"' >/dev/null
+check "subagent failed tools ignored: allowed at the break" test -z "$(ev PreCompact '"trigger":"auto"')"
+reset; tool Read >/dev/null; ev StopFailure '"agent_id":"a4","error":"rate_limit"' >/dev/null
+check "subagent StopFailure: the main turn is still running" test ! -e "$D/idle"
 
 # 10. Fix 7: a crash blocks compaction below the hard cap.
 reset
