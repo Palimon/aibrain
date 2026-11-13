@@ -79,6 +79,7 @@ Then open Git Bash from the Start menu, copy `bootstrap.sh` as on any computer, 
 - **The SSH server is Windows' own OpenSSH,** an optional feature. It takes key logins only, with Git Bash as the shell. The fleet key goes in `C:\ProgramData\ssh\administrators_authorized_keys`, which OpenSSH reads instead of `~/.ssh/authorized_keys` for an administrator. A firewall rule of its own lets SSH in through Tailscale's network adapter only, so this step waits until Tailscale is up.
 - **The `.bashrc` block reaches every Git Bash,** Claude Code's shells included, but not PowerShell.
 - **The OS agent has no hotkey on Windows.** Its folder is a project in the ChatGPT app instead. Claude's app has no list of projects to add it to: it shows the folder once a session has run there, so start the first one by choosing the folder in the Code tab.
+- **Linux-only tests run in WSL.** The [`wsl`](skills/wsl/SKILL.md) skill's `wsl-run` script runs a checkout's tests in a throwaway clone inside WSL, uncommitted changes included. Bootstrap doesn't install WSL or the tools a test needs.
 - **Not on Windows yet:** `CODEX_ONLY` stops the script.
 
 An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a terminal it can't ask for anything, so it needs `OP_SERVICE_ACCOUNT_TOKEN` set and the 1Password CLI already installed. It sets up light unless the computer has a saved choice or `AIBRAIN_SETUP` is set, and `AIBRAIN_COMPUTER=<name>` tells it which computer it's on.

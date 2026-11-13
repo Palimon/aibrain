@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Usage: wsl-run COMMAND [ARG...]
+# From a Windows checkout in Git Bash, run COMMAND in WSL inside a throwaway
+# Linux clone that holds this checkout's HEAD plus every uncommitted change,
+# untracked files included. COMMAND starts at the clone's root, and wsl-run
+# exits with its status. Without WSL it prints one skip line and exits 0.
+set -euo pipefail
+if ! { command -v wsl.exe >/dev/null && wsl.exe -e true 2>/dev/null; }; then
+  echo 'skip: WSL is not available' >&2
+  exit 0
+fi
+(($#)) || { echo 'Usage: wsl-run COMMAND [ARG...]' >&2; exit 2; }
+cd "$(git rev-parse --show-toplevel)"
+head=$(git rev-parse HEAD)
+# Snapshot the checkout as a tree through a copy of the index. Git keeps the
+# index's exec bits and line-ending rules, which a file copy from Windows loses.
+index=$(mktemp)
+trap 'rm -f "$index"' EXIT
+cp "$(git rev-parse --git-path index)" "$index"
+GIT_INDEX_FILE=$index git -c core.safecrlf=false add -A
+tree=$(GIT_INDEX_FILE=$index git write-tree)
+# C:/x/.git -> /mnt/c/x/.git. A worktree's own .git file says gitdir: C:/...,
+# which Linux git can't follow, so the clone comes from the common git dir.
+common=$(cd "$(git rev-parse --git-common-dir)" && pwd -W | sed -E 's|^([A-Za-z]):|/mnt/\L\1|')
+# MSYS2_ARG_CONV_EXCL stops Git Bash from rewriting /mnt/... arguments into
+# Windows paths.
+MSYS2_ARG_CONV_EXCL='*' wsl.exe -e bash -c '
+  set -e
+  d=$(mktemp -d)
+  trap "rm -rf \"\$d\"" EXIT
+  # --shared reads objects from the Windows repo, so the uncommitted tree is
+  # there without a ref.
+  git clone -q --shared -n "$1" "$d/repo"
+  cd "$d/repo"
+  git checkout -q --detach "$2"
+  git read-tree -u --reset "$3"
+  shift 3
+  "$@"
+' wsl-run "$common" "$head" "$tree" "$@"
