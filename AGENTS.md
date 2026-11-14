@@ -27,6 +27,20 @@ manual steps.
 Setup: `scripts/work-setup <name>` from canonical `main`.
 Finish: `scripts/work-finish` from the clean task worktree.
 
+# PRINCIPLES — in order of priority
+
+1. Question every requirement to make it less dumb, even one from a
+   smart person. Find the person or agent responsible for it so you
+   can ask why it exists.
+2. Delete parts and process steps aggressively. If you aren't
+   restoring something at least 10% of the time, you aren't deleting
+   enough.
+3. Simplify and optimize what remains, only after deleting. Don't
+   optimize something that shouldn't exist.
+4. Shorten the cycle time, only after the first three steps.
+5. Automate last, after questioning, deleting, simplifying and
+   shortening the cycle.
+
 # aibrain: rules for agents
 
 These rules apply to work on this repo and on the personal layer that goes with it (`~/Projects/aibrain-personal`; README, "Your personal layer").
