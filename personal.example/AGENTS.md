@@ -1,3 +1,17 @@
+# PRINCIPLES — in order of priority
+
+1. Question every requirement to make it less dumb, even one from a
+   smart person. Find the person or agent responsible for it so you
+   can ask why it exists.
+2. Delete parts and process steps aggressively. If you aren't
+   restoring something at least 10% of the time, you aren't deleting
+   enough.
+3. Simplify and optimize what remains, only after deleting. Don't
+   optimize something that shouldn't exist.
+4. Shorten the cycle time, only after the first three steps.
+5. Automate last, after questioning, deleting, simplifying and
+   shortening the cycle.
+
 # Working with me
 
 - Do the work yourself, including commands that change this machine's setup. Hand me something only when it needs me: a password, a browser login, or a decision that's mine to make.
