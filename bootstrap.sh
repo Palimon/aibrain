@@ -777,7 +777,8 @@ elif ssh_auth="$(python3 -I "$AIBRAIN/bin/aibrain-authorized-keys" "$HOME/.ssh/a
     [[ ! -s "$HOME/.ssh/authorized_keys" ]] || { mkdir -p "$BACKUP/.ssh" && cp "$HOME/.ssh/authorized_keys" "$BACKUP/.ssh/authorized_keys"; }
     printf '%s\n' "$ssh_auth" > "$HOME/.ssh/authorized_keys"
   fi
-  [[ -z "$ssh_pub" ]] || grep -qF "${ssh_pub#* }" "${SSH_LISTS[0]}" ||
+  # A key listed only for some computers (computers/<name>/authorized_keys) counts: it is narrow on purpose
+  [[ -z "$ssh_pub" ]] || grep -qsF "${ssh_pub#* }" "${SSH_LISTS[0]}" "$PERSONAL"/computers/*/authorized_keys ||
     warn "Your other computers don't accept this computer's SSH key yet. Add a line for it to the personal layer's ssh/authorized_keys, with its tailnet address: from=\"<address>\" $ssh_pub"
 else
   warn "The logins this computer accepts were left as they are (above)."
