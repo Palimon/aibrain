@@ -36,7 +36,6 @@ defaults() {
   ENGINE_REPO=https://github.com/Palimon/aibrain.git   # where this repo comes from; a fork sets its own
   OP_VAULT=aiagents               # the 1Password vault the aiagent service account opens
   GH_ITEM_NAME="GitHub Agent"     # items in that vault
-  SSH_KEY_ITEM_NAME="ssh fleet key"
   TS_KEY_ITEM="Tailscale auth key"
   GIT_NAME="" GIT_EMAIL=""        # git's global name and email; left alone when empty
   PUBLIC_GIT_NAME="" PUBLIC_GIT_EMAIL=""   # on commits to this public repo; empty: your GitHub login and noreply address
@@ -58,7 +57,6 @@ load_config() { # the defaults, then config.sh, then this computer's config.sh
   if [[ -n "$COMPUTER" && -r "$PERSONAL/computers/$COMPUTER/config.sh" ]]; then source "$PERSONAL/computers/$COMPUTER/config.sh"; fi
   REPO="${AIBRAIN_REPO:-$ENGINE_REPO}"   # AIBRAIN_REPO: only to test unpushed changes
   GH_ITEM="op://$OP_VAULT/$GH_ITEM_NAME/credential"
-  SSH_KEY_ITEM="op://$OP_VAULT/$SSH_KEY_ITEM_NAME"
 }
 COMPUTER="${AIBRAIN_COMPUTER:-$(cat "$COMPUTER_FILE" 2>/dev/null || true)}"   # settled once the personal layer is up to date
 load_config
@@ -746,24 +744,44 @@ for project in "$HOME"/Projects/*/; do
     warn "Couldn't synchronize the configured labels for $(basename "$project"). Check GitHub Issues write access."
 done
 
-# --- SSH. The fleet key from 1Password is this computer's key for your servers and your other computers.
+# --- SSH. Each computer has a key of its own, ~/.ssh/aibrain_fleet, made here the first time. No computer holds
+# another's, and none is kept in the vault, so one computer taken over opens no other. The personal layer's
+# ssh/authorized_keys lists the keys your computers accept, each limited with from= to where that computer logs in
+# from; computers/<name>/authorized_keys adds lines for one computer. They go in a marked block at the top of
+# ~/.ssh/authorized_keys. Lines outside it stay, except those holding a key from ssh/revoked_keys or a listed key.
+# A listed line without from= stops this part, so nothing is written (bin/aibrain-authorized-keys).
 # ~/.ssh/config starts with an Include of the personal layer's ssh/config when it has one. ssh keeps the
 # first value it finds for each setting, so those shortcuts win over anything else in the file.
 SSH_KEY="$HOME/.ssh/aibrain_fleet"
+SSH_LISTS=("$PERSONAL/ssh/authorized_keys")
+[[ -z "$COMPUTER" ]] || SSH_LISTS+=("$PERSONAL/computers/$COMPUTER/authorized_keys")
 mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-# (On Windows op writes the key's lines with CRLF, which Git Bash's OpenSSH can't read: tr takes the CRs out.)
-if ssh_key="$(op read "$SSH_KEY_ITEM/private key?ssh-format=openssh" 2>/dev/null | tr -d '\r')" && [[ -n "$ssh_key" ]] &&
-   ssh_pub="$(op read "$SSH_KEY_ITEM/public key" 2>/dev/null | tr -d '\r')"; then
-  [[ "$(cat "$SSH_KEY" 2>/dev/null)" == "$ssh_key" ]] || (umask 077; printf '%s\n' "$ssh_key" > "$SSH_KEY")
-  chmod 600 "$SSH_KEY"
-  [[ "$(cat "$SSH_KEY.pub" 2>/dev/null)" == "$ssh_pub ssh fleet key" ]] || printf '%s ssh fleet key\n' "$ssh_pub" > "$SSH_KEY.pub"
-  # Your other computers log in here with the same key
-  touch "$HOME/.ssh/authorized_keys" && chmod 600 "$HOME/.ssh/authorized_keys"
-  grep -qF "$ssh_pub" "$HOME/.ssh/authorized_keys" || printf '%s ssh fleet key\n' "$ssh_pub" >> "$HOME/.ssh/authorized_keys"
-else
-  warn "Couldn't read the \"$SSH_KEY_ITEM_NAME\" item from 1Password, so the fleet key isn't installed."
+ssh_pub="$(ssh-keygen -y -P '' -f "$SSH_KEY" 2>/dev/null | awk '{print $1" "$2}' || true)"
+if [[ ! -e "$SSH_KEY" ]] || { [[ -n "$ssh_pub" ]] && grep -qF "${ssh_pub#* }" "$PERSONAL/ssh/revoked_keys" 2>/dev/null; }; then
+  say "Making this computer's SSH key"
+  rm -f "$SSH_KEY" "$SSH_KEY.pub"
+  ssh-keygen -q -t ed25519 -N '' -C "$(hostname) fleet $(date +%F)" -f "$SSH_KEY"
+  ssh_pub="$(awk '{print $1" "$2}' "$SSH_KEY.pub")"
+elif [[ -z "$ssh_pub" ]]; then
+  warn "Couldn't read this computer's SSH key, $SSH_KEY, so it was left as it is."
 fi
-unset ssh_key
+chmod 600 "$SSH_KEY" 2>/dev/null || true
+[[ -z "$ssh_pub" || -s "$SSH_KEY.pub" ]] || printf '%s\n' "$ssh_pub" > "$SSH_KEY.pub"
+touch "$HOME/.ssh/authorized_keys" && chmod 600 "$HOME/.ssh/authorized_keys"
+ssh_logins=""
+if [[ ! -s "${SSH_LISTS[0]}" ]]; then
+  warn "The personal layer has no ssh/authorized_keys, so the logins this computer accepts were left as they are."
+elif ssh_auth="$(python3 -I "$AIBRAIN/bin/aibrain-authorized-keys" "$HOME/.ssh/authorized_keys" "$PERSONAL/ssh/revoked_keys" "${SSH_LISTS[@]}")" &&
+     ssh_logins="$(python3 -I "$AIBRAIN/bin/aibrain-authorized-keys" - - "${SSH_LISTS[@]}")"; then
+  if [[ "$ssh_auth" != "$(< "$HOME/.ssh/authorized_keys")" ]]; then
+    [[ ! -s "$HOME/.ssh/authorized_keys" ]] || { mkdir -p "$BACKUP/.ssh" && cp "$HOME/.ssh/authorized_keys" "$BACKUP/.ssh/authorized_keys"; }
+    printf '%s\n' "$ssh_auth" > "$HOME/.ssh/authorized_keys"
+  fi
+  [[ -z "$ssh_pub" ]] || grep -qF "${ssh_pub#* }" "${SSH_LISTS[0]}" ||
+    warn "Your other computers don't accept this computer's SSH key yet. Add a line for it to the personal layer's ssh/authorized_keys, with its tailnet address: from=\"<address>\" $ssh_pub"
+else
+  warn "The logins this computer accepts were left as they are (above)."
+fi
 ssh_include=""
 [[ ! -e "$PERSONAL/ssh/config" ]] || ssh_include="Include ~/Projects/aibrain-personal/ssh/config"
 touch "$HOME/.ssh/config" && chmod 600 "$HOME/.ssh/config"
@@ -964,12 +982,15 @@ fi
 
 # --- The SSH server on Windows: Windows' own OpenSSH, an optional feature, set up in one step as administrator.
 # Key logins only (a block at the top of C:\ProgramData\ssh\sshd_config, where the first value wins), the
-# fleet key in administrators_authorized_keys (sshd reads that file instead of ~/.ssh/authorized_keys for
-# an administrator), Git Bash as the shell, the service started with Windows, and a firewall rule of its own
+# logins from the personal layer's lists as the whole of administrators_authorized_keys (sshd reads that file
+# instead of ~/.ssh/authorized_keys for an administrator; only an administrator can read it, so what was last
+# written there is kept in WIN_SSH_LOGINS to compare), Git Bash as the shell, the service started with Windows, and a firewall rule of its own
 # that lets SSH in through Tailscale's network adapter only, with Windows' rule for every network turned off.
 # The adapter exists once Tailscale is up, so this step comes after Tailscale's.
-# Checking needs no administrator: the service, a login here with the fleet key, no password logins, the rule.
+# Checking needs no administrator: the service, the logins written, a login here with this computer's key, no
+# password logins, the rule.
 WIN_SSH_ADAPTER=Tailscale
+WIN_SSH_LOGINS="${XDG_CONFIG_HOME:-$HOME/.config}/aibrain/administrators_authorized_keys"
 WIN_SSH_RULE="Managed by ~/Projects/aibrain/bootstrap.sh: SSH through the $WIN_SSH_ADAPTER adapter only"
 win_ssh_login() { # win_ssh_login <ssh options>...: log in to this computer and run true; ssh's errors on stdout
   # Git Bash's ssh, the one agents use, which is stricter about keys than Windows' own
@@ -984,12 +1005,13 @@ win_sshd_ok() {
     $d = Get-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue
     "$($s.Status) $($s.StartType)|$($r.Enabled) $($r.Description)|$($d.Enabled)"' | tr -d '\r')"
   [[ "$got" == "$want" || "$got" == "${want}False" ]] &&
+    [[ -z "$ssh_logins" || "$(cat "$WIN_SSH_LOGINS" 2>/dev/null)" == "$ssh_logins" ]] &&
     win_ssh_login -i "$SSH_KEY" -o IdentitiesOnly=yes >/dev/null &&
     [[ "$(win_ssh_login -o PubkeyAuthentication=no)" == *"Permission denied (publickey)"* ]]
 }
 if [[ "$DISTRO" == windows ]]; then
-  if [[ -z "${ssh_pub:-}" ]]; then
-    warn "The SSH server isn't set up, since the fleet key couldn't be read."
+  if [[ -z "$ssh_pub" ]]; then
+    warn "The SSH server isn't set up, since this computer's SSH key couldn't be read."
   elif ! ts_up; then
     warn "The SSH server isn't set up, since it waits for Tailscale, whose adapter its firewall rule names."
   elif ! win_sshd_ok; then
@@ -1006,8 +1028,11 @@ if (-not (Test-Path \$conf)) { Start-Service sshd; Stop-Service sshd }   # its f
 \$new = \$block + [regex]::Replace(\$text, '(?s)# >>> aibrain >>>.*?# <<< aibrain <<<\r?\n', '')
 if (\$new -ne \$text) { [IO.File]::WriteAllText(\$conf, \$new) }
 & \"\$env:WINDIR\\System32\\OpenSSH\\sshd.exe\" -t; if (\$LASTEXITCODE) { throw \"sshd rejected \$conf\" }
-\$keys = \"\$dir\\administrators_authorized_keys\"; \$line = '$ssh_pub ssh fleet key'
-if (-not (Test-Path \$keys) -or -not (@(Get-Content \$keys) -contains \$line)) { Add-Content -Encoding ascii -LiteralPath \$keys -Value \$line }
+\$keys = \"\$dir\\administrators_authorized_keys\"
+\$logins = @'
+$ssh_logins
+'@
+if (\$logins) { [IO.File]::WriteAllText(\$keys, \$logins + \"\`n\") }
 icacls.exe \$keys /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null
 if (-not (Test-Path HKLM:\\SOFTWARE\\OpenSSH)) { New-Item -Path HKLM:\\SOFTWARE\\OpenSSH | Out-Null }   # the feature makes it, locked down
 Set-ItemProperty -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -Type String -Value '$(cygpath -w /)\\bin\\bash.exe'
@@ -1018,7 +1043,7 @@ Disable-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinu
   InterfaceAlias = '$WIN_SSH_ADAPTER'; Description = '$WIN_SSH_RULE' }
 if (Get-NetFirewallRule -Name aibrain-sshd -ErrorAction SilentlyContinue) { Set-NetFirewallRule -Name aibrain-sshd @rule }
 else { New-NetFirewallRule -Name aibrain-sshd -DisplayName 'OpenSSH server, tailnet only (aibrain)' @rule | Out-Null }" &&
-        win_sshd_ok || warn "The SSH server isn't fully set up. Check: ssh -i ~/.ssh/aibrain_fleet $USER@localhost"
+        { [[ -z "$ssh_logins" ]] || printf '%s\n' "$ssh_logins" > "$WIN_SSH_LOGINS"; } && win_sshd_ok || warn "The SSH server isn't fully set up. Check: ssh -i ~/.ssh/aibrain_fleet $USER@localhost"
     fi
   fi
 fi

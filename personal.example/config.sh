@@ -14,7 +14,6 @@ GIT_EMAIL=""
 # The 1Password vault the aiagent service account opens, and the item names bootstrap.sh reads there.
 #OP_VAULT=aiagents
 #GH_ITEM_NAME="GitHub Agent"
-#SSH_KEY_ITEM_NAME="ssh fleet key"
 #TS_KEY_ITEM="Tailscale auth key"
 
 # A full setup clones every repo of this GitHub account into ~/Projects, except SKIP_REPOS.

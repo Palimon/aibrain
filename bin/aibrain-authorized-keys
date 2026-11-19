@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""The SSH logins this computer accepts, as the personal layer lists them (README, "SSH").
+
+Usage: aibrain-authorized-keys CURRENT REVOKED LIST...
+
+Prints what CURRENT (an authorized_keys file; it may be missing; - for none) should hold: one marked block with every
+line of the LIST files, then CURRENT's own lines outside that block, without the lines holding a key from
+REVOKED (a file of public keys; it may be missing; - for none) or a key the block already lists. Comments and blank
+lines in the LIST files are left out.
+
+Every listed line must limit where its key may log in from, with a from="..." option. When one doesn't,
+this prints nothing, names the line on stderr and exits 1, so nothing gets written.
+"""
+import re
+import sys
+from pathlib import Path
+
+BEGIN = "# >>> aibrain: from the personal layer's ssh/authorized_keys, managed by bootstrap.sh >>>"
+END = "# <<< aibrain <<<"
+KEY = re.compile(r"(?:^|\s)(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)\s+([A-Za-z0-9+/]+={0,3})(?:\s|$)")
+FROM = re.compile(r'(?:^|,)from="[^"]+"')
+
+
+def lines(path):
+    if path == "-":
+        return []
+    try:
+        return Path(path).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+
+
+def parse(line):
+    """(options, key) of an authorized_keys line, or None when it holds no key."""
+    m = KEY.search(line)
+    return (line[: m.start()].strip(), m.group(1)) if m else None
+
+
+def main(args):
+    if len(args) < 3:
+        print(__doc__.strip().splitlines()[2], file=sys.stderr)
+        return 2
+    current, revoked, lists = args[0], args[1], args[2:]
+    block = []
+    for path in lists:
+        for line in lines(path):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parsed = parse(line)
+            if parsed is None or not FROM.search(parsed[0]):
+                print(f"{path}: this line has no from=\"...\" limit, so no line was written: {line[:60]}", file=sys.stderr)
+                return 1
+            block.append(line)
+    drop = {p[1] for p in map(parse, lines(revoked)) if p} | {parse(l)[1] for l in block}
+    rest, inside = [], False
+    for line in lines(current):
+        if line.strip() == BEGIN:
+            inside = True
+        elif line.strip() == END:
+            inside = False
+        elif not inside:
+            parsed = parse(line)
+            if parsed is None or parsed[1] not in drop:
+                rest.append(line)
+    while rest and not rest[-1].strip():
+        rest.pop()
+    out = ([BEGIN, *block, END] if block else []) + rest
+    sys.stdout.buffer.write("".join(l + "\n" for l in out).encode())   # LF on Windows too
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

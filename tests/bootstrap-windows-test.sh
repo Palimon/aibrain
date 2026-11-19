@@ -76,7 +76,7 @@ login() { # login <ssh> <ssh options>...: log in to this computer over SSH; ssh'
 }
 # Both clients: Git Bash's, which agents use, and Windows' own, which reads keys more leniently
 for c in /usr/bin/ssh /c/Windows/System32/OpenSSH/ssh.exe; do
-  check "the SSH server takes the fleet key from $c" login "$c" -i "$HOME/.ssh/aibrain_fleet" -o IdentitiesOnly=yes
+  check "the SSH server takes this computer's key from $c" login "$c" -i "$HOME/.ssh/aibrain_fleet" -o IdentitiesOnly=yes
 done
 check "the SSH server takes no passwords" bash -c '[[ "$1" == *"Permission denied (publickey)"* ]]' _ "$(login /usr/bin/ssh -o PubkeyAuthentication=no)"
 check "on the tailnet" bash -c '[[ "$("/c/Program Files/Tailscale/tailscale.exe" status --json | jq -r .BackendState | tr -d "\r")" == Running ]]'

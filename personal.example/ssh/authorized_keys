@@ -1,0 +1,5 @@
+# The SSH keys your computers accept: one line for each computer's own key (~/.ssh/aibrain_fleet.pub there),
+# limited with from= to the address it logs in from, such as its tailnet address. bootstrap.sh refuses a
+# line without from=. Lines for one computer only go in computers/<name>/authorized_keys.
+#from="192.0.2.11" ssh-ed25519 AAAA... my-laptop fleet
+#from="192.0.2.12" ssh-ed25519 AAAA... my-desktop fleet
