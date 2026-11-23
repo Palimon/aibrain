@@ -847,7 +847,9 @@ o.bind("SUPER + SHIFT + CTRL + A", "Agent", "aibrain-agent")'
 hl.bind("code:248", function() end, { locked = true, ignore_mods = true, dont_inhibit = true, submap_universal = true, description = "Ignore unsupported key reports" })'
   hypr_block+='
 -- <<< aibrain <<<'
-  mkdir -p "$(dirname "$HYPR_BINDINGS")" && touch "$HYPR_BINDINGS"
+  # Create the file only when it is missing: Hyprland reloads on any change to its mtime, and a reload re-applies
+  # every monitor mode, which blanks the screen.
+  mkdir -p "$(dirname "$HYPR_BINDINGS")" && { [[ -e "$HYPR_BINDINGS" ]] || : > "$HYPR_BINDINGS"; }
   # Take out the block, with the blank line before it, then put it back at the end
   hypr_new="$(awk '
     /^-- >>> aibrain >>>$/ { held = 0; skip = 1; next }

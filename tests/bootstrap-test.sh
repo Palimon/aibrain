@@ -398,7 +398,14 @@ EOF
   else
     echo "UNKNOWN_KEY_FILTER: NO"; rc=1; exit 1
   fi
+  # A run that changes nothing leaves the file's mtime alone, since Hyprland reloads (and blanks the screen) on it.
+  touch -d '2000-01-01' "$H/.config/hypr/bindings.lua"
   EXTRA_ENV=(); check_twice; show
+  if [[ "$(stat -c %Y "$H/.config/hypr/bindings.lua")" == "$(date -d '2000-01-01' +%s)" ]]; then
+    echo "BINDINGS_MTIME_KEPT: yes"
+  else
+    echo "BINDINGS_MTIME_KEPT: NO"; rc=1; exit 1
+  fi
   ;;
 picks)
   # Model and effort picks saved by Claude Code's pickers are put back, not stashed; other edits are stashed.
