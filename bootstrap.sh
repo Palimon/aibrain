@@ -174,8 +174,12 @@ codex_rpc() { # codex_rpc <request>...: send JSON-RPC requests, without ids, to 
   # ChatGPT app uses, and print each result on a line. Fails on the first error.
   # The coproc waits for a first line before it starts codex, so it can't end, and bash can't unset
   # CODEX_RPC, before its pipes are copied to fds of our own.
-  local id=0 req line rc=0 in out pid
-  coproc CODEX_RPC { IFS= read -r _ && exec codex app-server 2>/dev/null; }
+  # Over ssh on Windows, winget's link to codex.exe fails with "Permission denied", so a codex that
+  # won't run is replaced by the file its link points to.
+  local id=0 req line rc=0 in out pid codex
+  codex="$(command -v codex)" || return 1
+  "$codex" --version </dev/null >/dev/null 2>&1 || codex="$(readlink -f "$codex")"
+  coproc CODEX_RPC { IFS= read -r _ && exec "$codex" app-server 2>/dev/null; }
   pid="$CODEX_RPC_PID"
   exec {in}<&"${CODEX_RPC[0]}" {out}>&"${CODEX_RPC[1]}"
   exec {CODEX_RPC[0]}<&- {CODEX_RPC[1]}>&-

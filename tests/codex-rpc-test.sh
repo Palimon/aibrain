@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Unit tests for bootstrap.sh's codex_rpc: run it under set -u against fake `codex` programs, one that
-# answers the JSON-RPC requests and some that end at once, as a codex that can't start does.
+# answers the JSON-RPC requests, some that end at once, as a codex that can't start does, and a link
+# to the one that answers that won't run itself.
 # Usage: tests/codex-rpc-test.sh
 set -u
 BOOTSTRAP="$(cd "$(dirname "$0")/.." && pwd)/bootstrap.sh"
@@ -15,6 +16,9 @@ fake() { # fake <name> <body>: a fake codex in $W/<name>/codex
 fake answers 'while IFS= read -r l; do id="$(jq -r ".id // empty" <<< "$l")"; [[ -z $id ]] || jq -nc --argjson id "$id" "{id: \$id, result: {n: \$id}}"; done'
 fake exits 'exit 1'
 fake missing 'exit 127'
+# A link that won't run, as winget's link to codex.exe over ssh on Windows, to a codex that answers.
+mkdir -p "$W/link" && cp "$W/answers/codex" "$W/link/codex.real"
+sed -i '2i [[ $0 != */link/codex ]] || exit 126' "$W/link/codex.real" && ln -s codex.real "$W/link/codex"
 
 run() { # run <fake> <requests>...: codex_rpc's output, exit code and errors, in $W/out, $W/rc and $W/err
   PATH="$W/$1:$PATH" bash -c 'set -euo pipefail; source "$0"; codex_rpc "$@"' "$W/codex_rpc.sh" "${@:2}" \
@@ -28,6 +32,9 @@ check() { # check <name> <test>
 
 run answers '{"method":"a"}' '{"method":"b"}'
 check 'a working app-server prints each result' '[[ $(cat "$W/rc") == 0 && $(cat "$W/out") == $'"'"'{"n":1}\n{"n":2}'"'"' ]]'
+
+run link '{"method":"a"}'
+check 'a codex link that will not run is replaced by its target' '[[ $(cat "$W/rc") == 0 && $(cat "$W/out") == "{\"n\":1}" ]]'
 
 for f in exits missing; do
   for i in $(seq 10); do
