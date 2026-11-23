@@ -18,8 +18,9 @@ fake missing 'exit 127'
 
 run() { # run <fake> <requests>...: codex_rpc's output, exit code and errors, in $W/out, $W/rc and $W/err
   PATH="$W/$1:$PATH" bash -c 'set -euo pipefail; source "$0"; codex_rpc "$@"' "$W/codex_rpc.sh" "${@:2}" \
-    > "$W/out" 2> "$W/err"
+    > "$W/out.raw" 2> "$W/err"
   echo $? > "$W/rc"
+  tr -d '\r' < "$W/out.raw" > "$W/out"   # jq on Windows ends its lines with CRLF
 }
 check() { # check <name> <test>
   if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1"; echo "  out: $(cat "$W/out")"; echo "  err: $(cat "$W/err")"; fails=$((fails + 1)); fi
