@@ -172,22 +172,28 @@ apt_source() { # apt_source <package>: on Ubuntu, the vendor's apt repo and sign
 }
 codex_rpc() { # codex_rpc <request>...: send JSON-RPC requests, without ids, to `codex app-server`, the API the
   # ChatGPT app uses, and print each result on a line. Fails on the first error.
-  local id=0 req line rc=0
-  coproc CODEX_RPC { codex app-server 2>/dev/null; }
+  # The coproc waits for a first line before it starts codex, so it can't end, and bash can't unset
+  # CODEX_RPC, before its pipes are copied to fds of our own.
+  local id=0 req line rc=0 in out pid
+  coproc CODEX_RPC { IFS= read -r _ && exec codex app-server 2>/dev/null; }
+  pid="$CODEX_RPC_PID"
+  exec {in}<&"${CODEX_RPC[0]}" {out}>&"${CODEX_RPC[1]}"
+  exec {CODEX_RPC[0]}<&- {CODEX_RPC[1]}>&-
+  printf '\n' >&"$out"
   for req in '{"method":"initialize","params":{"clientInfo":{"name":"aibrain","version":"1"},"capabilities":{"experimentalApi":true}}}' "$@"; do
-    jq -c --argjson id "$id" '. + {id: $id}' <<< "$req" >&"${CODEX_RPC[1]}"
     rc=1
-    while IFS= read -r -t 60 line <&"${CODEX_RPC[0]}"; do
+    jq -c --argjson id "$id" '. + {id: $id}' <<< "$req" >&"$out" 2>/dev/null || break
+    while IFS= read -r -t 60 line <&"$in"; do
       [[ "$(jq -r '.id // empty' <<< "$line")" == "$id" ]] || continue
       jq -e 'has("result")' <<< "$line" >/dev/null && rc=0
       ((rc || id == 0)) || jq -c .result <<< "$line"
       break
     done
     ((rc == 0)) || break
-    ((id++ > 0)) || printf '%s\n' '{"method":"initialized"}' >&"${CODEX_RPC[1]}"
+    ((id++ > 0)) || printf '%s\n' '{"method":"initialized"}' >&"$out"
   done
-  exec {CODEX_RPC[1]}>&-
-  wait "$CODEX_RPC_PID" 2>/dev/null
+  exec {in}<&- {out}>&-
+  wait "$pid" 2>/dev/null || :
   return "$rc"
 }
 pkg_add() { # pkg_add <package>...: install the packages that are missing, from the distro's repos or a vendor's

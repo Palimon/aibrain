@@ -247,7 +247,7 @@ If GitHub rejects the token, put a new GitHub token in the "GitHub Agent" item a
 
 ## Changing the setup
 
-Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, and on Windows `tests/bootstrap-windows-test.sh` runs it on the computer itself, twice; `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, and `tests/privacy-test.sh` tests the privacy guard.
+Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, and on Windows `tests/bootstrap-windows-test.sh` runs it on the computer itself, twice; `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, `tests/codex-rpc-test.sh` tests how bootstrap talks to `codex app-server`, and `tests/privacy-test.sh` tests the privacy guard.
 
 ## Unsupported keyboard reports
 
