@@ -42,6 +42,9 @@ GIT_EMAIL=""
 # 1: Codex is this computer's only agent tool: no Claude Code (README, "Computers").
 #CODEX_ONLY=1
 
+# 0: sudo keeps asking for the password, so agents don't get root (README, "Computers").
+#PASSWORDLESS_SUDO=0
+
 # A small repo of GH_OWNER's that tests/bootstrap-test.sh full clones.
 #TEST_REPO=""
 

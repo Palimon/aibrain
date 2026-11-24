@@ -48,6 +48,7 @@ defaults() {
   HYPR_IGNORE_KEY_UNKNOWN=""      # 1: Hyprland ignores unsupported key reports (README, "Unsupported keyboard reports")
   HEADLESS=""                     # 1: no desktop: no Hyprland keys, Taildrop, bar widget or web app (README, "Computers")
   CODEX_ONLY=""                   # 1: Codex is the only agent tool: no Claude Code (README, "Computers")
+  PASSWORDLESS_SUDO=""            # 0: sudo keeps asking for the password: no NOPASSWD line (README, "Computers")
 }
 load_config() { # the defaults, then config.sh, then this computer's config.sh
   defaults
@@ -237,7 +238,7 @@ prune() { # prune <dir> <prefix>...: remove broken symlinks in <dir> that point 
 }
 
 # --- Passwordless sudo for this user, so agents can change the system without asking. Setting it up
-# asks for the password one last time. On Windows the same comes from UAC set to never notify:
+# asks for the password one last time. PASSWORDLESS_SUDO=0 removes it instead. On Windows the same comes from UAC set to never notify:
 # administrators elevate without being asked, with UAC itself still on. Setting it asks through UAC one
 # last time, and from then on win_admin needs no terminal (win_admin_ok).
 UAC_KEY='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
@@ -260,7 +261,12 @@ Set-ItemProperty -Path '$UAC_KEY' -Name PromptOnSecureDesktop -Value 0" && win_u
 fi
 SUDOERS=/etc/sudoers.d/zz-aibrain
 SUDOERS_LINE="$USER ALL=(ALL) NOPASSWD: ALL"
-if [[ "$DISTRO" != windows && "$(sudo -n cat "$SUDOERS" 2>/dev/null)" != "$SUDOERS_LINE" ]]; then
+if [[ "$DISTRO" != windows && "$PASSWORDLESS_SUDO" == 0 ]]; then
+  if sudo -n test -e "$SUDOERS" 2>/dev/null; then
+    say "Making sudo ask for $USER's password again"
+    sudo -n rm -f "$SUDOERS"
+  fi
+elif [[ "$DISTRO" != windows && "$(sudo -n cat "$SUDOERS" 2>/dev/null)" != "$SUDOERS_LINE" ]]; then
   if have_tty || sudo -n true 2>/dev/null; then
     say "Making sudo passwordless for $USER"
     sudoers_tmp="$(mktemp)"; printf '%s\n' "$SUDOERS_LINE" > "$sudoers_tmp"

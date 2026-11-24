@@ -13,6 +13,7 @@ OS_AGENT_DIRS=(/srv/osagent)    # the OS agent keeps its memory on another disk
 HYPR_IGNORE_KEY_UNKNOWN=1       # this computer's keyboard sends unsupported key reports
 HEADLESS=1                      # a server: no desktop
 CODEX_ONLY=1                    # Codex is the only agent tool: no Claude Code
+PASSWORDLESS_SUDO=0             # agents don't get root: sudo keeps asking for the password
 ```
 
 ## setup.sh
