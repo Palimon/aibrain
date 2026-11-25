@@ -93,7 +93,7 @@ An agent can run it too, as `~/Projects/aibrain/bootstrap.sh`. Without a termina
 |---|---|
 | `config.sh` | Your values for `bootstrap.sh` on every computer: git identity, the identity for commits to this repo, vault and item names, which repos to clone. Every setting and its default is listed in the template. |
 | `computers/<name>/` | What differs on one computer: settings in `config.sh`, and steps of your own in `setup.sh`. See "Computers" below. |
-| `setup.sh` | Optional: steps of your own that `bootstrap.sh` runs at the end, on every computer |
+| `setup.sh` | Optional: steps of your own that `bootstrap.sh` runs near the end, before it trusts the repos in `~/Projects`, on every computer |
 | `AGENTS.md` | Your instructions for every agent, linked as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` and `~/.grok/AGENTS.md` |
 | `ssh/config` | SSH shortcuts to your computers and servers, included at the top of `~/.ssh/config` |
 | `privacy/denylist` | Names, addresses and anything else of yours that must never reach this repo |
@@ -107,7 +107,7 @@ The script finds the layer's repo in this order: `AIBRAIN_PERSONAL_REPO` when se
 Every computer has a folder in the personal layer, named after it, for what differs on that computer alone. The script adds the folder for a new computer, commits it and pushes it, so every run applies it again, and so does the first run after a reinstall:
 
 - `computers/<name>/config.sh` sets settings for that computer on top of `config.sh`. Its first line says what the computer is (hardware and the date it was added). Any setting can go there. These usually do: `TS_SHARE_LAN` on the computer that shares your LAN with the tailnet, `TS_ACCEPT_ROUTES=0` on the other computers on that LAN (below), `OS_AGENT_DIRS` on one that keeps the OS agent's memory on another disk, `HYPR_IGNORE_KEY_UNKNOWN` on one whose keyboard needs it, on a server, `HEADLESS` and `CODEX_ONLY` (below), and `PASSWORDLESS_SUDO=0` on one where agents must not get root.
-- `computers/<name>/setup.sh` holds steps that no setting covers, such as a kernel module option or a package only that computer needs. The layer's own `setup.sh` does the same for every computer. Both run at the end of each `bootstrap.sh` run, with `AIBRAIN`, `PERSONAL`, `COMPUTER` and `BACKUP` set, so like the script, each step must change nothing on a second run. `personal.example/computers/README.md` has examples.
+- `computers/<name>/setup.sh` holds steps that no setting covers, such as a kernel module option or a package only that computer needs. The layer's own `setup.sh` does the same for every computer. Both run near the end of each `bootstrap.sh` run, before it trusts the repos in `~/Projects`, so a repo they clone is trusted on the same run. They run with `AIBRAIN`, `PERSONAL`, `COMPUTER` and `BACKUP` set, so like the script, each step must change nothing on a second run. `personal.example/computers/README.md` has examples.
 
 The script saves the computer's name in `~/.config/aibrain/computer` and asks only when that file is missing, as on a fresh install:
 - **New or existing?** "Existing" is a computer set up again after a reinstall: pick it from the list of your computers, and it gets its settings back. "New" asks for a name (the hostname by default; lowercase letters, digits and dashes) and adds its folder. The computer's Tailscale name is a good choice.

@@ -140,7 +140,7 @@ hook_state() { # run the Stop hook exactly as the linked settings.json wires it,
 }
 check_twice() {
   snap > "$H.snap1"; echo "--- run 2 (checkout)"; run 0 "$H/Projects/aibrain/bootstrap.sh" | grep -v '^==>' ; snap > "$H.snap2"
-  if diff "$H.snap1" "$H.snap2"; then echo "IDEMPOTENT: yes"; else echo "IDEMPOTENT: NO"; fi
+  if diff "$H.snap1" "$H.snap2"; then echo "IDEMPOTENT: yes"; else echo "IDEMPOTENT: NO"; rc=1; fi
   if grep -qx 'session-state hook: ok' "$H.snap2" && grep -qx 'session-state folder: 700' "$H.snap2"; then
     echo "SESSION_STATE_HOOK: yes"
   else
@@ -238,7 +238,7 @@ ubuntu_start() { # ubuntu_start <name>: a fresh container, $CT, with the engine 
   rm -rf "$ROOT/engine.git"; git clone -q --bare "$SRC" "$ROOT/engine.git"
   git -C "$ROOT/engine.git" update-ref refs/heads/main "$(git -C "$SRC" rev-parse HEAD)"
   git -C "$ROOT/engine.git" symbolic-ref HEAD refs/heads/main
-  CT="aibrain-test-$1-$$"; trap '"${DOCKER[@]}" rm -f "$CT" >/dev/null 2>&1; rm -rf "$ROOT"' EXIT
+  CT="aibrain-test-$1-$$"; trap 's=$?; "${DOCKER[@]}" rm -f "$CT" >/dev/null 2>&1; rm -rf "$ROOT"; exit "${rc:-$s}"' EXIT
   "${DOCKER[@]}" run -d --name "$CT" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock \
     -v "$ROOT:/fixtures" "$image" >/dev/null || { echo "UBUNTU: couldn't start the container"; exit 1; }
   printf '%s\n' "$TS_STUB" | "${DOCKER[@]}" exec -i "$CT" sh -c 'cat > /usr/local/bin/tailscale && chmod 755 /usr/local/bin/tailscale &&
@@ -281,7 +281,7 @@ usnap() { # the container's state: the user's files and links, and the system's 
 }
 ucheck_twice() { # ucheck_twice <snap file prefix>: run the checkout's copy again and compare
   usnap > "$1.snap1"; echo "--- run 2 (checkout)"; urun 0 /home/user/Projects/aibrain/bootstrap.sh | grep -v '^==>'; usnap > "$1.snap2"
-  if diff "$1.snap1" "$1.snap2"; then echo "IDEMPOTENT: yes"; else echo "IDEMPOTENT: NO"; fi
+  if diff "$1.snap1" "$1.snap2"; then echo "IDEMPOTENT: yes"; else echo "IDEMPOTENT: NO"; rc=1; fi
 }
 
 if [[ "${1:-}" != ubuntu* && "${1:-}" != all ]]; then

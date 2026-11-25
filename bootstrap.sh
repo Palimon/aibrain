@@ -1077,6 +1077,16 @@ if [[ "$CODEX_ONLY" != 1 ]] && ! claude auth status >/dev/null 2>&1; then
   fi
 fi
 
+# --- Your own steps, for what no setting covers: the personal layer's setup.sh on every computer, then
+# computers/<name>/setup.sh on this one. They run before the trust steps below, so a repo they clone into
+# ~/Projects is trusted on the same run. Like this script, each must change nothing on a second run.
+# They get AIBRAIN, PERSONAL, COMPUTER and BACKUP; one that fails gets a warning, and the run goes on.
+for f in "$PERSONAL/setup.sh" "$PERSONAL/computers/$COMPUTER/setup.sh"; do
+  [[ -f "$f" ]] || continue
+  AIBRAIN="$AIBRAIN" PERSONAL="$PERSONAL" COMPUTER="$COMPUTER" BACKUP="$BACKUP" bash "$f" ||
+    warn "${f#"$HOME"/} failed (exit $?)."
+done
+
 # --- Claude Code asks before its first session in a folder until that folder is trusted, and trusting a
 # parent doesn't cover the repos inside it. Trust the OS agent folder and every repo in ~/Projects, the
 # way Claude Code's docs say to: projects["<path>"].hasTrustDialogAccepted in ~/.claude.json.
@@ -1130,15 +1140,6 @@ if [[ "$REPO" =~ ^https://github\.com/([^/]+/[^/]+)$ && -s "$PERSONAL/privacy/de
     fi
   fi
 fi
-
-# --- Your own steps, for what no setting covers: the personal layer's setup.sh on every computer, then
-# computers/<name>/setup.sh on this one. Like this script, each must change nothing on a second run.
-# They get AIBRAIN, PERSONAL, COMPUTER and BACKUP; one that fails gets a warning, and the run goes on.
-for f in "$PERSONAL/setup.sh" "$PERSONAL/computers/$COMPUTER/setup.sh"; do
-  [[ -f "$f" ]] || continue
-  AIBRAIN="$AIBRAIN" PERSONAL="$PERSONAL" COMPUTER="$COMPUTER" BACKUP="$BACKUP" bash "$f" ||
-    warn "${f#"$HOME"/} failed (exit $?)."
-done
 
 [[ -d "$BACKUP" ]] && warn "Files this run replaced are saved in $BACKUP"
 say "aibrain setup complete. New terminals pick up the aiagent token."
