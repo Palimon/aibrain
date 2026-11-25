@@ -373,7 +373,7 @@ systemctl --user unset-environment OP_SERVICE_ACCOUNT_TOKEN 2>/dev/null || true
 # the checkout and hand over to a newer copy of the script.
 gh_days() { # gh_days <gh api -i reply>: days until the login's token expires, or nothing
   local e; e="$(printf '%s\n' "$1" | tr -d '\r' | awk -F': ' 'tolower($1) == "github-authentication-token-expiration" { print $2; exit }')"
-  [[ -n "$e" ]] && echo $(( ($(date -d "$e" +%s) - $(date +%s)) / 86400 ))
+  [[ -z "$e" ]] || echo $(( ($(date -d "$e" +%s) - $(date +%s)) / 86400 ))
 }
 gh_reply="$(gh api -i user 2>/dev/null)" || gh_reply=""
 gh_left="$(gh_days "$gh_reply")"
