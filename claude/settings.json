@@ -104,6 +104,10 @@
           {
             "type": "command",
             "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/session-state.py\" Stop"
+          },
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/sign-in-handoff.py\""
           }
         ]
       }

@@ -712,6 +712,10 @@ if [[ "$CODEX_ONLY" != 1 ]]; then
   if ! printf '{"tool_name":"Bash","tool_input":{}}' | python3 -I "$AIBRAIN/claude/hooks/op-budget.py" >/dev/null; then
     warn "Claude Code's 1Password budget hook doesn't run here, so an agent can poll op and use up the account's daily reads. Check: python3 -I $AIBRAIN/claude/hooks/op-budget.py"
   fi
+  # The sign-in handoff hook (claude/hooks/sign-in-handoff.py, README "Sign-ins on other computers") likewise.
+  if ! printf '{"last_assistant_message":""}' | python3 -I "$AIBRAIN/claude/hooks/sign-in-handoff.py" >/dev/null; then
+    warn "Claude Code's sign-in handoff hook doesn't run here, so an agent can hand the user a sign-in to run on another computer. Check: python3 -I $AIBRAIN/claude/hooks/sign-in-handoff.py"
+  fi
 fi
 
 # --- ~/.bashrc loads the aiagent token in every shell. The block must sit above

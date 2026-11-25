@@ -148,7 +148,7 @@ To check by hand: `python3 -I privacy/scan.py tree` for the files, `python3 -I p
 | `claude/` | Claude Code's own config | `~/.claude/settings.json`, `~/.claude/keybindings.json` |
 | `claude/agents/` | Claude Code subagent definitions for every project: the contractors and the general employees (see [Subagents](#subagents)) | `~/.claude/agents`, one link per file |
 | `claude/managed-settings.json` | Claude Code's default model and effort, Opus at medium | Copied to `/etc/claude-code/managed-settings.json` |
-| `claude/hooks/` | Claude Code hooks: `session-state.py` (see [Long sessions](#long-sessions)), `agent-cache.py` (see [Subagents](#subagents)), `op-budget.py` (see [1Password read budget](#1password-read-budget)) and `privacy-guard.py` (see [Privacy guard](#privacy-guard)) | Run from the repo by `claude/settings.json` |
+| `claude/hooks/` | Claude Code hooks: `session-state.py` (see [Long sessions](#long-sessions)), `agent-cache.py` (see [Subagents](#subagents)), `op-budget.py` (see [1Password read budget](#1password-read-budget)), `sign-in-handoff.py` (see [Sign-ins on other computers](#sign-ins-on-other-computers)) and `privacy-guard.py` (see [Privacy guard](#privacy-guard)) | Run from the repo by `claude/settings.json` |
 | `bin/` | Helper scripts | `~/.local/bin` |
 | `privacy/`, `.githooks/`, `.github/workflows/` | The privacy guard | `.githooks/` through `core.hooksPath` |
 | `personal.example/` | The template for your personal layer | Copied once, when you have none |
@@ -200,6 +200,10 @@ To change the limits: the soft cap is `autoCompactWindow` and the idle threshold
 All service accounts of one 1Password account share one daily request limit (1000 a day on a personal or family account), and every `op` call counts against it: `op read` by item name costs 3 requests, by item and vault ID 1. A poll that reads a secret every couple of minutes uses the whole day's budget, and then no computer can read the vault until the window rolls over. `claude/hooks/op-budget.py` refuses a Bash command that calls `op` inside a loop (`for`, `while`, `until`, `watch`, `xargs`), a Monitor command that calls `op` at all, and a command that runs a script file which calls `op` inside a polling loop (a `while` or `until`, or a loop that sleeps), following scripts two levels deep. A `while read` over a list and a `for` over a fixed list inside a script are allowed. Read a secret once, before the loop, or poll something that needs none. `op service-account ratelimit` shows what's left, and costs a request too. `tests/op-budget-test.sh` checks the hook's decisions.
 
 The setup's own reads are kept few. `bootstrap.sh` checks the saved token with `op vault list` on each run, and reads the "GitHub Agent" item only when GitHub refuses the current login or its token expires within two weeks. `tests/bootstrap-test.sh` puts a stub `op` first on the PATH of its host scenarios that answers a repeated read-only call from a cache on tmpfs, so a whole test run reaches 1Password a few times rather than twice per bootstrap run; the Ubuntu container scenarios still read for real.
+
+## Sign-ins on other computers
+
+A device-code or browser sign-in on another computer (`tailscale up`, `gh auth login`, `codex login`, a project's `sign-in.sh`) runs fine over ssh in the background, so the agent starts it, not the user. It sends the output to a file, because a pipe can hold the code line back, reads the address and code from the file, gives the user only those, and does the follow-up itself. `claude/hooks/sign-in-handoff.py` is a Stop hook. If a final message tells the user to run a sign-in command ("On the server, run `sign-in.sh`", "log in as alice and run ...", "until you run ..."), it blocks the stop once and tells the agent to start the sign-in itself. Past-tense lines ("I ran") and a project's `remote-sign-in` command are left alone. On a second stop it lets the message through, so an agent that does need the user (for a password only they have, or a physical step) can say so. `tests/sign-in-handoff-test.sh` checks its decisions.
 
 ## Subagents
 
@@ -256,7 +260,7 @@ If GitHub rejects the token, put a new GitHub token in the "GitHub Agent" item a
 
 ## Changing the setup
 
-Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, and on Windows `tests/bootstrap-windows-test.sh` runs it on the computer itself, twice; `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, `tests/op-budget-test.sh` tests the 1Password budget hook, `tests/codex-rpc-test.sh` tests how bootstrap talks to `codex app-server`, and `tests/privacy-test.sh` tests the privacy guard.
+Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, and on Windows `tests/bootstrap-windows-test.sh` runs it on the computer itself, twice; `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, `tests/op-budget-test.sh` tests the 1Password budget hook, `tests/sign-in-handoff-test.sh` tests the sign-in handoff hook, `tests/codex-rpc-test.sh` tests how bootstrap talks to `codex app-server`, and `tests/privacy-test.sh` tests the privacy guard.
 
 ## Unsupported keyboard reports
 
