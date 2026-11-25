@@ -1,6 +1,6 @@
 # Watch a reserved issue
 
-Spawn one read-only subagent using Terra with low reasoning effort. On Codex's collaboration tools, use `model: "gpt-6.1-terra"`, `reasoning_effort: "low"` and `fork_turns: "none"`. Give it the explicit repository, issue number and URL, parent identity, actual reserved label name, and a stable checkout path from which authenticated `gh` works. The watcher only reads GitHub and reports to its parent. The parent owns labels and implementation.
+Spawn one read-only subagent using gpt-6-luna with low reasoning effort. On Codex's collaboration tools, use `model: "gpt-6-luna"`, `reasoning_effort: "low"` and `fork_turns: "none"`. Give it the explicit repository, issue number and URL, parent identity, actual reserved label name, and a stable checkout path from which authenticated `gh` works. The watcher only reads GitHub and reports to its parent. The parent owns labels and implementation.
 
 Use this brief, substituting the run's actual values:
 
@@ -8,4 +8,4 @@ Use this brief, substituting the run's actual values:
 
 Keep the parent run active and wait for the subagent's message or completion using the runtime's supported agent wait tools. Respect tool wait limits. After notification, recheck the issue before starting implementation as described in `SKILL.md`. Do not end the parent turn with an unattended watcher and assume implementation will resume automatically.
 
-If Terra at low effort or persistent subagent waiting is unavailable, report that specific limitation and the reserved issue URL. Do not silently substitute a different model, a parent polling loop, or a scheduled job. Leave the reservation status explicit. A cancelled run stops the watcher and releases its reservation.
+If gpt-6-luna at low effort or persistent subagent waiting is unavailable, report that specific limitation and the reserved issue URL. Do not silently substitute a different model, a parent polling loop, or a scheduled job. Leave the reservation status explicit. A cancelled run stops the watcher and releases its reservation.
