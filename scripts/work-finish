@@ -21,6 +21,7 @@ for attempt in 1 2 3; do
     cd "$validation/repo"
     bash tests/privacy-test.sh
     bash tests/agent-cache-test.sh
+    bash tests/op-budget-test.sh
     bash tests/session-state-test.sh
     bash tests/codex-rpc-test.sh
     python3 tests/labels-test.py

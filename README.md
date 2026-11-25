@@ -148,7 +148,7 @@ To check by hand: `python3 -I privacy/scan.py tree` for the files, `python3 -I p
 | `claude/` | Claude Code's own config | `~/.claude/settings.json`, `~/.claude/keybindings.json` |
 | `claude/agents/` | Claude Code subagent definitions for every project: the contractors and the general employees (see [Subagents](#subagents)) | `~/.claude/agents`, one link per file |
 | `claude/managed-settings.json` | Claude Code's default model and effort, Opus at medium | Copied to `/etc/claude-code/managed-settings.json` |
-| `claude/hooks/` | Claude Code hooks: `session-state.py` (see [Long sessions](#long-sessions)), `agent-cache.py` (see [Subagents](#subagents)) and `privacy-guard.py` (see [Privacy guard](#privacy-guard)) | Run from the repo by `claude/settings.json` |
+| `claude/hooks/` | Claude Code hooks: `session-state.py` (see [Long sessions](#long-sessions)), `agent-cache.py` (see [Subagents](#subagents)), `op-budget.py` (see [1Password read budget](#1password-read-budget)) and `privacy-guard.py` (see [Privacy guard](#privacy-guard)) | Run from the repo by `claude/settings.json` |
 | `bin/` | Helper scripts | `~/.local/bin` |
 | `privacy/`, `.githooks/`, `.github/workflows/` | The privacy guard | `.githooks/` through `core.hooksPath` |
 | `personal.example/` | The template for your personal layer | Copied once, when you have none |
@@ -194,6 +194,10 @@ Claude Code main sessions compact at about 150k tokens, but only at a natural br
 The files are in `~/.local/state/aibrain/sessions/<session id>/`, readable by you only, because the prompt log keeps whatever you paste. A session's folder is deleted when it's older than Claude Code keeps its transcripts (`cleanupPeriodDays`, 30 days unless you set it). Every bootstrap run makes the folder private again and checks that the hook runs on that computer. A session that was already running when `settings.json` changed gets the hooks at once but keeps its old compaction window (about 967k on Fable and Opus) until it's restarted. A background job doesn't restart when you leave or `/exit` its view, because it runs in a long-lived Claude Code process; give it the new window with `/autocompact 150k`. That command also saves the window into `claude/settings.json` under `modelSettings`; the next bootstrap run puts it back, or discard it with `git checkout claude/settings.json`.
 
 To change the limits: the soft cap is `autoCompactWindow` and the idle threshold is `CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS` in `claude/settings.json`; the hard cap is `AIBRAIN_COMPACT_HARD_CAP` (200000 unless set), and the other thresholds are constants at the top of the hook. `events.log` in the session's folder logs each compaction the hook allowed or blocked, with the reason and the context size, and each time it asked for a state-file update; `errors.log` holds the hook's own failures. `tests/session-state-test.sh` checks the hook's decisions after a change. The design and its numbers are in `study/workspace/2026-10-subagent-design.md`.
+
+## 1Password read budget
+
+All service accounts of one 1Password account share one daily request limit (1000 a day on a personal or family account), and every `op` call counts against it: `op read` by item name costs 3 requests, by item and vault ID 1. A poll that reads a secret every couple of minutes uses the whole day's budget, and then no computer can read the vault until the window rolls over. `claude/hooks/op-budget.py` refuses a Bash command that calls `op` inside a loop (`for`, `while`, `until`, `watch`, `xargs`), a Monitor command that calls `op` at all, and a command that runs a script file which calls `op` inside a polling loop (a `while` or `until`, or a loop that sleeps), following scripts two levels deep. A `while read` over a list and a `for` over a fixed list inside a script are allowed. Read a secret once, before the loop, or poll something that needs none. `op service-account ratelimit` shows what's left, and costs a request too. `tests/op-budget-test.sh` checks the hook's decisions.
 
 ## Subagents
 
@@ -250,7 +254,7 @@ If GitHub rejects the token, put a new GitHub token in the "GitHub Agent" item a
 
 ## Changing the setup
 
-Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, and on Windows `tests/bootstrap-windows-test.sh` runs it on the computer itself, twice; `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, `tests/codex-rpc-test.sh` tests how bootstrap talks to `codex app-server`, and `tests/privacy-test.sh` tests the privacy guard.
+Any change to the setup goes into `bootstrap.sh` in the same commit, so every computer ends up the same. `AGENTS.md` holds the full rules for agents. `tests/bootstrap-test.sh` tests a change in throwaway homes, and on Windows `tests/bootstrap-windows-test.sh` runs it on the computer itself, twice; `tests/session-state-test.sh` tests the session-state hook, `tests/agent-cache-test.sh` tests the agent-cache hook, `tests/op-budget-test.sh` tests the 1Password budget hook, `tests/codex-rpc-test.sh` tests how bootstrap talks to `codex app-server`, and `tests/privacy-test.sh` tests the privacy guard.
 
 ## Unsupported keyboard reports
 

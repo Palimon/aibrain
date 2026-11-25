@@ -697,6 +697,10 @@ if [[ "$CODEX_ONLY" != 1 ]]; then
   if ! printf '{"tool_name":"Bash","tool_input":{}}' | python3 -I "$AIBRAIN/claude/hooks/agent-cache.py" >/dev/null; then
     warn "Claude Code's agent-cache hook doesn't run here, so subagents can re-write their cache by accident. Check: python3 -I $AIBRAIN/claude/hooks/agent-cache.py"
   fi
+  # The 1Password budget hook (claude/hooks/op-budget.py, README "1Password read budget") likewise.
+  if ! printf '{"tool_name":"Bash","tool_input":{}}' | python3 -I "$AIBRAIN/claude/hooks/op-budget.py" >/dev/null; then
+    warn "Claude Code's 1Password budget hook doesn't run here, so an agent can poll op and use up the account's daily reads. Check: python3 -I $AIBRAIN/claude/hooks/op-budget.py"
+  fi
 fi
 
 # --- ~/.bashrc loads the aiagent token in every shell. The block must sit above

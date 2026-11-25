@@ -33,6 +33,19 @@
           {
             "type": "command",
             "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/agent-cache.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/op-budget.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/Projects/aibrain/claude/hooks/op-budget.py\""
           }
         ]
       },
