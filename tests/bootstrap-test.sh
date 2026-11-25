@@ -1,7 +1,8 @@
 #!/bin/bash
 # Runs bootstrap.sh in throwaway homes on tmpfs, so a change can be tested without touching the real
 # home. Each scenario runs the script twice and checks the second run changes nothing.
-# Needs OP_SERVICE_ACCOUNT_TOKEN set (every shell has it unless a launcher sets AIBRAIN_NO_VAULT=1). Tests the last commit in this checkout.
+# Needs the aiagent token: the saved ~/.config/op/aiagent-token, as bootstrap itself prefers it, else
+# OP_SERVICE_ACCOUNT_TOKEN (a long-lived shell can hold a token rotated since). Tests the last commit in this checkout.
 # Usage: tests/bootstrap-test.sh fresh|bashrc-migrate|no-personal|migrate|projects-junk|full|unknown-key-binding|picks|computers|worktrees|ubuntu|ubuntu-claude|all
 #
 # Each home gets a personal layer cloned from a fixture made from personal.example, except in
@@ -18,6 +19,7 @@
 # through sudo when this user can't reach it), where every step runs for real except joining the tailnet.
 # There is no user systemd bus inside the test, so the Taildrop warning is expected.
 set -uo pipefail
+[[ -s ~/.config/op/aiagent-token ]] && export OP_SERVICE_ACCOUNT_TOKEN="$(< ~/.config/op/aiagent-token)"
 ROOT="$XDG_RUNTIME_DIR/aibrain-test"
 REAL_MISE="${MISE_DATA_DIR:-$HOME/.local/share/mise}"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"   # this checkout, holding the commit under test

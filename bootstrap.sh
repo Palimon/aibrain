@@ -362,6 +362,9 @@ if ! token_ok "$token"; then
 fi
 chmod 600 "$TOKEN_FILE"
 export OP_SERVICE_ACCOUNT_TOKEN="$token"; unset token
+# A desktop session copies the login environment into the systemd user manager once, so after a rotation it
+# hands the old token to everything it starts. Drop that copy; shells read the saved token (.bashrc).
+systemctl --user unset-environment OP_SERVICE_ACCOUNT_TOKEN 2>/dev/null || true
 
 # --- GitHub: gh logged in with the token from 1Password, git pulling and pushing through gh.
 # The item is read only when GitHub refuses the current login (none yet, expired, revoked) or its token
