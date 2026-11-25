@@ -199,6 +199,8 @@ To change the limits: the soft cap is `autoCompactWindow` and the idle threshold
 
 All service accounts of one 1Password account share one daily request limit (1000 a day on a personal or family account), and every `op` call counts against it: `op read` by item name costs 3 requests, by item and vault ID 1. A poll that reads a secret every couple of minutes uses the whole day's budget, and then no computer can read the vault until the window rolls over. `claude/hooks/op-budget.py` refuses a Bash command that calls `op` inside a loop (`for`, `while`, `until`, `watch`, `xargs`), a Monitor command that calls `op` at all, and a command that runs a script file which calls `op` inside a polling loop (a `while` or `until`, or a loop that sleeps), following scripts two levels deep. A `while read` over a list and a `for` over a fixed list inside a script are allowed. Read a secret once, before the loop, or poll something that needs none. `op service-account ratelimit` shows what's left, and costs a request too. `tests/op-budget-test.sh` checks the hook's decisions.
 
+The setup's own reads are kept few. `bootstrap.sh` checks the saved token with `op vault list` on each run, and reads the "GitHub Agent" item only when GitHub refuses the current login or its token expires within two weeks. `tests/bootstrap-test.sh` puts a stub `op` first on the PATH of its host scenarios that answers a repeated read-only call from a cache on tmpfs, so a whole test run reaches 1Password a few times rather than twice per bootstrap run; the Ubuntu container scenarios still read for real.
+
 ## Subagents
 
 The research, the cost numbers and every decision so far are in `study/workspace/2026-10-subagent-design.md`. What's in place:

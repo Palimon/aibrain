@@ -364,27 +364,35 @@ chmod 600 "$TOKEN_FILE"
 export OP_SERVICE_ACCOUNT_TOKEN="$token"; unset token
 
 # --- GitHub: gh logged in with the token from 1Password, git pulling and pushing through gh.
-# If the item can't be read, the current login stays, so this run can still update the checkout and
-# hand over to a newer copy of the script.
-if gh_token="$(op read "$GH_ITEM" 2>/dev/null)" && [[ -n "$gh_token" ]]; then
-  if [[ "$(gh auth token -h github.com 2>/dev/null || true)" != "$gh_token" ]]; then
-    say "Logging the GitHub CLI in"
-    printf '%s' "$gh_token" | gh auth login -h github.com -p https --with-token
+# The item is read only when GitHub refuses the current login (none yet, expired, revoked) or its token
+# expires within two weeks: a read costs 3 of the 1Password account's shared daily requests, and bootstrap
+# runs on every landing. If the item can't be read, the current login stays, so this run can still update
+# the checkout and hand over to a newer copy of the script.
+gh_days() { # gh_days <gh api -i reply>: days until the login's token expires, or nothing
+  local e; e="$(printf '%s\n' "$1" | tr -d '\r' | awk -F': ' 'tolower($1) == "github-authentication-token-expiration" { print $2; exit }')"
+  [[ -n "$e" ]] && echo $(( ($(date -d "$e" +%s) - $(date +%s)) / 86400 ))
+}
+gh_reply="$(gh api -i user 2>/dev/null)" || gh_reply=""
+gh_left="$(gh_days "$gh_reply")"
+if [[ -z "$gh_reply" ]] || { [[ -n "$gh_left" ]] && (( gh_left < 14 )); }; then
+  if gh_token="$(op read "$GH_ITEM" 2>/dev/null)" && [[ -n "$gh_token" ]]; then
+    if [[ "$(gh auth token -h github.com 2>/dev/null || true)" != "$gh_token" ]]; then
+      say "Logging the GitHub CLI in"
+      printf '%s' "$gh_token" | gh auth login -h github.com -p https --with-token
+      gh_reply="$(gh api -i user 2>/dev/null)" || gh_reply=""
+      gh_left="$(gh_days "$gh_reply")"
+    fi
+  else
+    warn "Couldn't read the GitHub token from the \"$GH_ITEM_NAME\" item in 1Password. Keeping the current GitHub login."
   fi
-else
-  warn "Couldn't read the GitHub token from the \"$GH_ITEM_NAME\" item in 1Password. Keeping the current GitHub login."
+  unset gh_token
 fi
-unset gh_token
-# GitHub sends the token's expiry date with every API reply. Warn two weeks ahead.
-if gh_reply="$(gh api -i user 2>/dev/null)"; then
-  gh_expiry="$(printf '%s\n' "$gh_reply" | tr -d '\r' | awk -F': ' 'tolower($1) == "github-authentication-token-expiration" { print $2; exit }')"
-  if [[ -n "$gh_expiry" ]] && gh_days=$(( ($(date -d "$gh_expiry" +%s) - $(date +%s)) / 86400 )) && (( gh_days < 14 )); then
-    warn "The GitHub token expires in $gh_days day(s), on ${gh_expiry%% *}. Put a new one in the \"$GH_ITEM_NAME\" item in 1Password."
-  fi
-else
+if [[ -z "$gh_reply" ]]; then
   warn "GitHub didn't accept the current login. If its token has expired, put a new one in the \"$GH_ITEM_NAME\" item in 1Password."
+elif [[ -n "$gh_left" ]] && (( gh_left < 14 )); then
+  warn "The GitHub token expires in $gh_left day(s). Put a new one in the \"$GH_ITEM_NAME\" item in 1Password."
 fi
-unset gh_reply
+unset gh_reply gh_left
 gh config set -h github.com git_protocol https
 # setup-git would write gh's versioned install path; point at the mise shim so gh upgrades don't break git.
 # winget's gh keeps one path, on the PATH.

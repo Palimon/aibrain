@@ -37,7 +37,31 @@ host_check() { # host_check: fail loudly when the host differs from HOST_BEFORE
     echo "HOST_UNCHANGED: NO"; return 1
   fi
 }
-trap 'rm -rf "$ROOT"' EXIT                   # the homes hold copies of the token
+# 1Password reads cost the whole account: service accounts share one daily limit, and a bootstrap run reads
+# twice. The host scenarios put a stub op first on PATH that answers a repeated read-only call from a cache
+# (mode 700, on tmpfs, kept for one top-level run), so each distinct call reaches 1Password once a test run.
+OP_STUB=""
+if command -v op >/dev/null; then
+  if [[ -z ${AIBRAIN_TEST_OP:-} ]]; then
+    export AIBRAIN_TEST_OP="$XDG_RUNTIME_DIR/aibrain-test-op.$$"; OP_STUB_OWNER=1
+    (umask 077; mkdir -p "$AIBRAIN_TEST_OP/bin" "$AIBRAIN_TEST_OP/cache")
+    cat > "$AIBRAIN_TEST_OP/bin/op" <<'EOF'
+#!/bin/bash
+stub="$(dirname "$0")"; real="$(PATH="${PATH//$stub:/}" command -v op)" || exit 127
+case "$1 ${2:-}" in
+  "vault list"|"item get"|"item list"|"whoami "|read\ *)
+    f="$stub/../cache/$(printf '%s\0' "${OP_SERVICE_ACCOUNT_TOKEN:-}" "$@" | sha256sum | cut -c1-32)"
+    [[ -f $f ]] || { (umask 077; "$real" "$@" > "$f.new") && mv "$f.new" "$f" || { s=$?; rm -f "$f.new"; exit "$s"; }; }
+    cat "$f" ;;
+  *) exec "$real" "$@" ;;
+esac
+EOF
+    chmod 700 "$AIBRAIN_TEST_OP/bin/op"
+  fi
+  OP_STUB="$AIBRAIN_TEST_OP/bin:"
+fi
+cleanup() { rm -rf "$ROOT"; [[ -z ${OP_STUB_OWNER:-} ]] || rm -rf "$AIBRAIN_TEST_OP"; }
+trap cleanup EXIT                            # the homes, and the op cache, hold copies of secrets
 mkdir -p "$ROOT"; git -C "$SRC" show HEAD:bootstrap.sh > "$ROOT/pasted.sh"
 
 mkfixture() { # a personal layer repo: personal.example as committed, with test values, a skill of its own, a
@@ -99,7 +123,7 @@ EXTRA_ENV=()   # more variables for the script, such as AIBRAIN_SETUP
 run() { # run <with-env-token 0|1> <script>; no tty, no DBus (gh can't reach the real keyring)
   local tok=(); [[ $1 == 1 ]] && tok=(OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_ACCOUNT_TOKEN")
   [[ " ${EXTRA_ENV[*]} " != *ubuntu-box* ]] || { echo "ubuntu-box is Codex-only, so only the ubuntu scenarios run as it"; rc=1; exit 1; }
-  (cd "$H" && setsid -w env -i HOME="$H" USER="$USER" PATH=/usr/local/bin:/usr/bin TERM=dumb \
+  (cd "$H" && setsid -w env -i HOME="$H" USER="$USER" PATH="${OP_STUB}/usr/local/bin:/usr/bin" TERM=dumb \
     XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" XDG_STATE_HOME="$H/.local/state" XDG_CACHE_HOME="$H/.cache" \
     DBUS_SESSION_BUS_ADDRESS=disabled: AIBRAIN_TEST_KEEP_TAILSCALE=1 AIBRAIN_REPO="$SRC" AIBRAIN_PERSONAL_REPO="$PERSONAL_REPO" "${tok[@]}" "${EXTRA_ENV[@]}" bash "$2" </dev/null 2>&1) | sed 's/\x1b\[[0-9;]*m//g'
   echo "[exit ${PIPESTATUS[0]}]"
@@ -238,7 +262,7 @@ ubuntu_start() { # ubuntu_start <name>: a fresh container, $CT, with the engine 
   rm -rf "$ROOT/engine.git"; git clone -q --bare "$SRC" "$ROOT/engine.git"
   git -C "$ROOT/engine.git" update-ref refs/heads/main "$(git -C "$SRC" rev-parse HEAD)"
   git -C "$ROOT/engine.git" symbolic-ref HEAD refs/heads/main
-  CT="aibrain-test-$1-$$"; trap 's=$?; "${DOCKER[@]}" rm -f "$CT" >/dev/null 2>&1; rm -rf "$ROOT"; exit "${rc:-$s}"' EXIT
+  CT="aibrain-test-$1-$$"; trap 's=$?; "${DOCKER[@]}" rm -f "$CT" >/dev/null 2>&1; cleanup; exit "${rc:-$s}"' EXIT
   "${DOCKER[@]}" run -d --name "$CT" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock \
     -v "$ROOT:/fixtures" "$image" >/dev/null || { echo "UBUNTU: couldn't start the container"; exit 1; }
   printf '%s\n' "$TS_STUB" | "${DOCKER[@]}" exec -i "$CT" sh -c 'cat > /usr/local/bin/tailscale && chmod 755 /usr/local/bin/tailscale &&
@@ -286,7 +310,7 @@ ucheck_twice() { # ucheck_twice <snap file prefix>: run the checkout's copy agai
 
 if [[ "${1:-}" != ubuntu* && "${1:-}" != all ]]; then
   HOST_BEFORE="$(host_state)"
-  trap 'host_check || rc=1; rm -rf "$ROOT"; exit "${rc:-0}"' EXIT
+  trap 'host_check || rc=1; cleanup; exit "${rc:-0}"' EXIT
 fi
 if [[ "${1:-}" == all ]]; then
   HOST_BEFORE="$(host_state)"; rc=0
