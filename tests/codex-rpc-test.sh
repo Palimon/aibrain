@@ -33,8 +33,12 @@ check() { # check <name> <test>
 run answers '{"method":"a"}' '{"method":"b"}'
 check 'a working app-server prints each result' '[[ $(cat "$W/rc") == 0 && $(cat "$W/out") == $'"'"'{"n":1}\n{"n":2}'"'"' ]]'
 
-run link '{"method":"a"}'
-check 'a codex link that will not run is replaced by its target' '[[ $(cat "$W/rc") == 0 && $(cat "$W/out") == "{\"n\":1}" ]]'
+if [[ -L "$W/link/codex" ]]; then
+  run link '{"method":"a"}'
+  check 'a codex link that will not run is replaced by its target' '[[ $(cat "$W/rc") == 0 && $(cat "$W/out") == "{\"n\":1}" ]]'
+else
+  echo "skip: a codex link that will not run is replaced by its target (ln -s here makes a copy, not a link)"
+fi
 
 for f in exits missing; do
   for i in $(seq 10); do
