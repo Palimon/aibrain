@@ -5,12 +5,15 @@ Usage: aibrain-authorized-keys CURRENT REVOKED LIST...
 
 Prints what CURRENT (an authorized_keys file; it may be missing; - for none) should hold: one marked block with every
 line of the LIST files, then CURRENT's own lines outside that block, without the lines holding a key from
-REVOKED (a file of public keys; it may be missing; - for none) or a key the block already lists. Comments and blank
-lines in the LIST files are left out.
+REVOKED (a file of public keys, or of `ssh-keygen -l` lines for a key whose public half is lost; it may be missing;
+- for none) or a key the block already lists. Comments and blank lines in the LIST and REVOKED files are left out.
 
 Every listed line must limit where its key may log in from, with a from="..." option. When one doesn't,
 this prints nothing, names the line on stderr and exits 1, so nothing gets written.
 """
+import base64
+import binascii
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -19,6 +22,7 @@ BEGIN = "# >>> aibrain: from the personal layer's ssh/authorized_keys, managed b
 END = "# <<< aibrain <<<"
 KEY = re.compile(r"(?:^|\s)(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)\s+([A-Za-z0-9+/]+={0,3})(?:\s|$)")
 FROM = re.compile(r'(?:^|,)from="[^"]+"')
+FINGERPRINT = re.compile(r"(?:^|\s)(SHA256:[A-Za-z0-9+/]{43})(?:\s|$)")
 
 
 def lines(path):
@@ -34,6 +38,15 @@ def parse(line):
     """(options, key) of an authorized_keys line, or None when it holds no key."""
     m = KEY.search(line)
     return (line[: m.start()].strip(), m.group(1)) if m else None
+
+
+def fingerprint(key):
+    """The SHA256: fingerprint ssh-keygen -l shows for a base64 key blob."""
+    try:
+        blob = base64.b64decode(key, validate=True)
+    except binascii.Error:
+        return None
+    return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
 
 
 def main(args):
@@ -52,7 +65,9 @@ def main(args):
                 print(f"{path}: this line has no from=\"...\" limit, so no line was written: {line[:60]}", file=sys.stderr)
                 return 1
             block.append(line)
-    drop = {p[1] for p in map(parse, lines(revoked)) if p} | {parse(l)[1] for l in block}
+    revoked_lines = [l for l in lines(revoked) if not l.lstrip().startswith("#")]
+    drop = {p[1] for p in map(parse, revoked_lines) if p} | {parse(l)[1] for l in block}
+    drop_fp = {m.group(1) for m in map(FINGERPRINT.search, revoked_lines) if m}
     rest, inside = [], False
     for line in lines(current):
         if line.strip() == BEGIN:
@@ -61,7 +76,7 @@ def main(args):
             inside = False
         elif not inside:
             parsed = parse(line)
-            if parsed is None or parsed[1] not in drop:
+            if parsed is None or (parsed[1] not in drop and fingerprint(parsed[1]) not in drop_fp):
                 rest.append(line)
     while rest and not rest[-1].strip():
         rest.pop()

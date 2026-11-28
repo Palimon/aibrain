@@ -3,6 +3,8 @@
 
 Every listed line must carry a from= limit; a line without one fails the whole run, so nothing is written.
 """
+import base64
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -61,6 +63,13 @@ class AuthorizedKeys(unittest.TestCase):
         # Written back, a second run changes nothing
         Path(current).write_text(r.stdout)
         self.assertEqual(self.run_helper(current, revoked, lists, extra).stdout, r.stdout)
+
+    def test_a_key_revoked_by_fingerprint(self):
+        fp = "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode(OLD)).digest()).decode().rstrip("=")
+        revoked = self.file("revoked", f"256 {fp} old, public half lost (ED25519)")
+        current = self.file("current", f"ssh-ed25519 {OLD} old", f"ssh-ed25519 {OTHER} kept")
+        r = self.run_helper(current, revoked, self.file("list"))
+        self.assertEqual((r.returncode, r.stdout), (0, f"ssh-ed25519 {OTHER} kept\n"), r.stderr)
 
     def test_missing_files(self):
         r = self.run_helper(str(self.dir / "none"), str(self.dir / "none"), str(self.dir / "none"))

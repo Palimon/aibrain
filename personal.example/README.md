@@ -10,7 +10,7 @@ This folder is the template for `~/Projects/aibrain-personal`, the private half 
 | `AGENTS.md` | Your instructions for every agent | Linked as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` and `~/.grok/AGENTS.md` |
 | `ssh/config` | SSH shortcuts to your computers and servers | An `Include` at the top of `~/.ssh/config` |
 | `ssh/authorized_keys` | The keys your computers accept, each computer's own, each with a `from=` limit | A marked block in `~/.ssh/authorized_keys` |
-| `ssh/revoked_keys` | Public keys no computer may accept any more | Lines holding them taken out of `~/.ssh/authorized_keys` |
+| `ssh/revoked_keys` | Public keys no computer may accept any more, or their `ssh-keygen -l` line when the public half is lost | Lines holding them taken out of `~/.ssh/authorized_keys` |
 | `privacy/denylist` | Names, addresses and anything else of yours that must never reach the public repo | The privacy guard (`privacy/scan.py` in aibrain) |
 | `skills/`, `claude/agents/`, `bin/` | Optional: your own skills, Claude Code agents and scripts. One here wins over aibrain's with the same name | Linked like aibrain's |
 | `NEXT-STEPS.md` | Your open work on the setup | You and your agents |
